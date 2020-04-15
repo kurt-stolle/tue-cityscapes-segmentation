@@ -1,0 +1,59 @@
+\documentclass[10pt,final,journal,twoside, a4paper]{IEEEtran}
+
+% Recommended packages from IEEEtran documentation
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{siunitx}
+\usepackage{bm}
+\interdisplaylinepenalty=2500
+
+% Citations
+\usepackage{cite}
+
+% Tables with footnotes
+\usepackage{threeparttable}
+
+% Tikz - used to draw diagrams
+\usepackage{tikz,pgfplots}
+\usetikzlibrary{shapes}
+\usetikzlibrary{arrows}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.3}
+\fboxsep=0pt
+
+% Listings
+\usepackage{minted}
+
+% References and clickable refs
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{cleveref}
+
+
+% Hyphenation for field-specific terms
+\hyphenation{eindhoven op-tical net-works semi-conduc-tor}
+
+\title{Cityscapes Segmentation}
+\author{
+    \IEEEauthorblockN{K.H.W. Stolle}
+    \IEEEauthorblockA{k.h.w.stolle@student.tue.nl}
+}
+
+\begin{document}
+
+    \maketitle
+
+    \begin{abstract}
+        \input{_abstract}
+    \end{abstract}
+    \begin{IEEEkeywords}
+        Cityscapes, Segmentation, CNN
+    \end{IEEEkeywords}
+
+    \section{Introduction}
+    \input{_introduction}
+
+    \bibliographystyle{IEEEtran}
+    \bibliography{bib}
+
+\end{document}
