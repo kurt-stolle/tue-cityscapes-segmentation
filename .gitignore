@@ -132,3 +132,19 @@ dmypy.json
 .pyre/
 
 
+
+paper/main.aux
+
+paper/main.bbl
+
+paper/main.blg
+
+paper/main.fdb_latexmk
+
+paper/main.fls
+
+paper/main.out
+
+paper/main.pdf
+
+paper/main.synctex.gz
