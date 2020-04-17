@@ -1,8 +1,130 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
+import os
+import sys
 
+import torch
+from torch import nn, optim
+# from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
+
+from src import networks
 from src import data
+
+
+def train_net(net: nn.Module,
+			  device,
+			  input_dir: str,
+			  truth_dir: str,
+			  epochs=5,
+			  batch_size=1,
+			  lr=0.001,
+			  val_percent=0.1,
+			  save_cp=True,
+			  img_scale=0.5):
+	# Load the dataset
+	dataset = data.Cityscapes(input_dir, truth_dir, img_scale)
+
+	# Split the dataset
+	n_val = int(len(dataset) * val_percent)
+	n_train = len(dataset) - n_val
+	train, val = random_split(dataset, [n_train, n_val])
+
+	# Define loaders for each split
+	train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+	val_loader = DataLoader(val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
+
+	# Use the Tensorboard summary writer
+	# writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
+	global_step = 0
+
+	# Logging
+	logging.info(f'''Starting training:
+        Epochs:          {epochs}
+        Batch size:      {batch_size}
+        Learning rate:   {lr}
+        Training size:   {n_train}
+        Validation size: {n_val}
+        Checkpoints:     {save_cp}
+        Device:          {device.type}
+        Images scaling:  {img_scale}
+    ''')
+
+	optimizer = optim.RMSprop(net.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
+	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min' if net.n_classes > 1 else 'max', patience=2)
+	if net.n_classes > 1:
+		criterion = nn.CrossEntropyLoss()
+	else:
+		criterion = nn.BCEWithLogitsLoss()
+
+	for epoch in range(epochs):
+		net.train()
+
+		epoch_loss = 0
+		with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
+			for batch in train_loader:
+				imgs = batch['image']
+				true_masks = batch['mask']
+				assert imgs.shape[1] == net.n_channels, \
+					f'Network has been defined with {net.n_channels} input channels, ' \
+					f'but loaded images have {imgs.shape[1]} channels. Please check that ' \
+					'the images are loaded correctly.'
+
+				imgs = imgs.to(device=device, dtype=torch.float32)
+				mask_type = torch.float32 if net.n_classes == 1 else torch.long
+				true_masks = true_masks.to(device=device, dtype=mask_type)
+
+				masks_pred = net(imgs)
+				loss = criterion(masks_pred, true_masks)
+				epoch_loss += loss.item()
+				# writer.add_scalar('Loss/train', loss.item(), global_step)
+
+				pbar.set_postfix(**{'loss (batch)': loss.item()})
+
+				optimizer.zero_grad()
+				loss.backward()
+				nn.utils.clip_grad_value_(net.parameters(), 0.1)
+				optimizer.step()
+
+				pbar.update(imgs.shape[0])
+				global_step += 1
+				if global_step % (len(dataset) // (10 * batch_size)) == 0:
+					for tag, value in net.named_parameters():
+						tag = tag.replace('.', '/')
+					# writer.add_histogram('weights/' + tag, value.data.cpu().numpy(), global_step)
+					# writer.add_histogram('grads/' + tag, value.grad.data.cpu().numpy(), global_step)
+					val_score = net.eval_dice(val_loader, device)
+					scheduler.step(val_score)
+					# writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], global_step)
+
+					if net.n_classes > 1:
+						logging.info('Validation cross entropy: {}'.format(val_score))
+					# writer.add_scalar('Loss/test', val_score, global_step)
+					else:
+						logging.info('Validation Dice Coeff: {}'.format(val_score))
+					# writer.add_scalar('Dice/test', val_score, global_step)
+
+				# writer.add_images('images', imgs, global_step)
+				# if net.n_classes == 1:
+				# writer.add_images('masks/true', true_masks, global_step)
+				# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
+
+	# if save_cp:
+	# 	try:
+	# 		os.mkdir(dir_checkpoint)
+	# 		logging.info('Created checkpoint directory')
+	# 	except OSError:
+	# 		pass
+	# 	torch.save(net.state_dict(),
+	# 			   dir_checkpoint + f'CP_epoch{epoch + 1}.pth')
+	# 	logging.info(f'Checkpoint {epoch + 1} saved !')
+
+
+# writer.close()
+
 
 def get_args():
 	parser = argparse.ArgumentParser(description='Train the UNet on images and target masks',
@@ -26,9 +148,41 @@ def get_args():
 
 
 if __name__ == "__main__":
+	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+	# Parse the CLI arguments
 	args = get_args()
 
-	data = data.Cityscapes(args.input_dir, args.truth_dir)
+	# Create the network
+	device = torch.device('cpu')  # 'cuda' if torch.cuda.is_available() else 'cpu')
+	logging.info(f'Using device {device}')
 
-	for f in data:
-		print(f)
+	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.labels), bilinear=True)
+
+	if args.model:
+		net.load_state_dict(
+			torch.load(args.model, map_location=device)
+		)
+		logging.info(f'Model loaded from {args.model}')
+
+	net.to(device=device)
+
+	# cudnn.benchmark = True
+
+	try:
+		train_net(net,
+				  device,
+				  args.input_dir,
+				  args.truth_dir,
+				  epochs=args.epochs,
+				  batch_size=args.batchsize,
+				  lr=args.lr,
+				  img_scale=args.scale,
+				  val_percent=args.val / 100)
+	except KeyboardInterrupt:
+		torch.save(net.state_dict(), 'INTERRUPTED.pth')
+		logging.info('Saved interrupt')
+		try:
+			sys.exit(0)
+		except SystemExit:
+			os._exit(0)

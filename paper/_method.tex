@@ -1,3 +1,45 @@
+\subsection{The dataset}
+\label{dataset}
+
+As with any machine learning project, first the available data has to be parsed into a practical format.
+The dataset provides a number of document types that can be used for the segmentation task.
+This paper only uses the files ending with \texttt{\_leftImg8bit.png} and \texttt{\_polygons.json}, which are the input images and ground truth masks respectively.
+Parsing the PNG-images (inputs) is straightforward: when an item in the dataset is requested, the file is read and converted to an array of matrices, where each channel (red, green and blue) is an element of the array. 
+
+\begin{table}
+    \centering
+    \caption{Target labels}
+    \label{tab:labels}
+    \begin{tabular}{ll}
+        \hline
+        Category    & Labels \\
+        \hline
+        Flat        & road, sidewalk, parking, rail track \\
+        Human       & person, rider \\
+        Vehicle     & car, truck, bus, on rails, motorcycle, bicycle, trailer \\
+        Construction& building, wall, fence, guard rail, bridge, tunnel \\
+        Object      & pole, pole group, traffic sign, traffic light \\
+        Nature      & vegetation, terrain \\
+        Sky	        & sky \\
+        Void        & ground, dynamic, static \\
+        \hline
+    \end{tabular}
+\end{table}
+
+The polygons file is more complex, it contains a list of vertices and the corresponding labels that appear on a given sample. 
+This must also be converted into an array of matrices, but in this case each matrix in the array represents a mask that encodes the presence of one of the classes in \Cref{tab:labels} at a given pixel on the input matrix.
+
+
+\subsection{Setting a baseline}
+\label{subsec:baseline}
+
+The baseline implementation sets a reference point to improve upon and score our method against.
+
+The architecture U-Net is suitable for semantic segmentation~\cite{RonnebergerFB15}.
+It can be used as an off-the-shelf network for performing the task.
+
+Our implementation of the UNet is based on~\cite{GH-Pytorch-UNet2018} with some modifications to run on the target system and handle the input files.
+
 \subsection{Data augmentation}
 \label{subsec:data-augmentation}
 

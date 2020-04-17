@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -7,7 +8,7 @@ import torch
 
 from glob import glob
 from torch.utils.data import Dataset
-from PIL import Image
+from PIL import Image, ImageDraw
 from typing import Dict
 
 
@@ -27,6 +28,17 @@ class Cityscapes(Dataset):
 	"""The Cityscapes dataset, see: https://www.cityscapes-dataset.com/"""
 
 	__read_reg = r"^(\w+)_(\d+)_(\d+).*.png$"
+
+	labels = (
+		"road", "sidewalk", "parking", "rail track",  # flat
+		"person", "rider",  # human
+		"car", "truck", "bus", "on rails", "motorcycle", "bicycle", "caravan", "trailer",  # vehicle
+		"building", "wall", "fence", "guard rail", "bridge", "tunnel",  # construction
+		"pole", "pole group", "traffic sign", "traffic light",  # object
+		"vegetation", "terrain",  # nature
+		"sky",  # sky
+		"ground", "dynamic", "static"  # void
+	)
 
 	def __init__(self, input_dir: str, truth_dir: str, scale=1):
 		self.input_dir = input_dir
@@ -53,32 +65,25 @@ class Cityscapes(Dataset):
 		sample = self.items[i]
 		sample_id = sample.get_id()
 
-		# Read the truth and input files
-		truth_file = glob(os.sep.join([self.truth_dir, sample.city, sample_id + "_gtFine_color.png"]))
-		input_file = glob(os.sep.join([self.input_dir, sample.city, sample_id + "_leftImg8bit.png"]))
+		# Preprocess the truth
+		with open(os.sep.join([self.truth_dir, sample.city, sample_id + "_gtFine_polygons.json"])) as f:
+			data = json.load(f)
+			mask = self.preprocess_polygons(data, self.scale)
 
-		assert len(truth_file) == 1, \
-			f'Either no truth mask or multiple truth masks found for the ID {sample_id}: {truth_file}'
+		# Preprocess the image
+		input_file = glob(os.sep.join([self.input_dir, sample.city, sample_id + "_leftImg8bit.png"]))
 		assert len(input_file) == 1, \
 			f'Either no image or multiple images found for the ID {sample_id}: {input_file}'
 
-		# Open with PIL
-		mask = Image.open(truth_file[0])
-		img = Image.open(input_file[0])
+		img = self.preprocess(Image.open(input_file[0]), self.scale)
 
-		assert img.size == mask.size, \
-			f'Image and mask {sample_id} should be the same size, but are {img.size} and {mask.size}'
+		# assert img.size == mask.size, \
+		# 	f'Image and mask {sample_id} should be the same size, but are {img.size} and {mask.size}'
 
-		# Preprocess the truth
-		# Fixme
-
-		# Preprocess the image
-		img = self.preprocess(img, self.scale)
-
-		return {'input': torch.from_numpy(img), 'truth': torch.from_numpy(mask)}
+		return {'image': torch.from_numpy(img), 'mask': torch.from_numpy(mask)}
 
 	@staticmethod
-	def downscale(img_pil: Image, scale: float):
+	def downscale(img_pil: Image, scale: float) -> Image:
 		# Image scaling
 		w, h = img_pil.size
 		w, h = int(scale * w), int(scale * h)
@@ -88,14 +93,37 @@ class Cityscapes(Dataset):
 		return img_pil.resize((w, h))
 
 	@classmethod
-	def color_to_truth(cls, img_pil: Image, scale: float) -> np.ndarray:
-		# Downscale the image
-		img_pil = cls.downscale(img_pil, scale)
+	def preprocess_polygons(cls, data: Dict, scale: float) -> (np.ndarray):
+		# Read the size from the data object
+		size = (data["imgWidth"], data["imgHeight"])
 
-		# Convert to 2d array
-		img_np = np.ndarray()
+		# Create a buffer 3d-array CHW
+		result = np.empty((len(cls.labels), int(size[1] * scale), int(size[0] * scale)))
 
-		return img_np
+		# Iterate over the objects in the polygon data
+		for obj in data["objects"]:
+			try:
+				i = cls.labels.index(obj["label"])
+			except ValueError:
+				#logging.warning(f"""Polygons file contains unexpected label {obj["label"]}""")
+				continue
+
+			# flatten the array, [[x1,y1],[x2,y2]] -> [x1,y1,x2,x2]
+			polygon = [item for sublist in obj["polygon"] for item in sublist]
+
+			# use PIL to make an image on which we can draw the array
+			img_pil = Image.new('L', size, 0)
+			ImageDraw.Draw(img_pil).polygon(polygon, outline=1, fill=1)
+
+			# scale the mask
+			img_pil = cls.downscale(img_pil, scale)
+
+			# convert to numpy array an add at the correct index
+			img_np = np.array(img_pil)
+
+			result[i] = img_np
+
+		return result
 
 	@classmethod
 	def preprocess(cls, img_pil: Image, scale: float) -> np.ndarray:
