@@ -27,7 +27,6 @@ class Cityscapes(Dataset):
 
 	__read_reg = r"^(\w+)_(\d+)_(\d+).*.png$"
 
-	"""
 	labels = (
 		"road", "sidewalk", "parking", "rail track",  # flat
 		"person", "rider",  # human
@@ -37,10 +36,6 @@ class Cityscapes(Dataset):
 		"vegetation", "terrain",  # nature
 		"sky",  # sky
 		"ground", "dynamic", "static"  # void
-	)
-	"""
-	labels = (
-		"ground", "sky", "road", "car"
 	)
 
 	def __init__(self, input_dir: str, truth_dir: str, scale=1, cache_dir: str = None):
@@ -79,8 +74,8 @@ class Cityscapes(Dataset):
 
 		# Check if there is a cache directory
 		if self.cache_dir is not None:
-			fname_cache_img = os.sep.join((self.cache_dir, sample.id + "_image.npy"))
-			fname_cache_mask = os.sep.join((self.cache_dir, sample.id + "_mask.npy"))
+			fname_cache_img = os.sep.join((self.cache_dir, f"{sample.id}_@{self.scale}x_image.npy"))
+			fname_cache_mask = os.sep.join((self.cache_dir, f"{sample.id}_@{self.scale}x_mask.npy"))
 
 			try:
 				img = np.load(fname_cache_img, allow_pickle=False)
@@ -98,7 +93,7 @@ class Cityscapes(Dataset):
 			img = self.load_image_file(sample)
 			mask = self.load_polygons_file(sample)
 
-		assert img[0].shape == mask[0].shape, \
+		assert img[0].shape == mask.shape, \
 			"Image and Masks are not the same shape. Check the ground truth and input image dimensions"
 
 		return {'image': torch.from_numpy(img), 'mask': torch.from_numpy(mask)}
@@ -136,8 +131,8 @@ class Cityscapes(Dataset):
 		# Read the size from the data object
 		size = (data["imgWidth"], data["imgHeight"])
 
-		# Create a buffer 3d-array CHW
-		result = np.empty((len(cls.labels), int(size[1] * scale), int(size[0] * scale)))
+		# Create a buffer 3d-array HW
+		img_pil = Image.new('L', size, -1)
 
 		# Iterate over the objects in the polygon data
 		for obj in data["objects"]:
@@ -151,18 +146,9 @@ class Cityscapes(Dataset):
 			polygon = [item for sublist in obj["polygon"] for item in sublist]
 
 			# use PIL to make an image on which we can draw the array
-			img_pil = Image.new('L', size, 0)
-			ImageDraw.Draw(img_pil).polygon(polygon, outline=1, fill=1)
+			ImageDraw.Draw(img_pil).polygon(polygon, outline=i, fill=i)
 
-			# scale the mask
-			img_pil = cls.downscale(img_pil, scale)
-
-			# convert to numpy array an add at the correct index
-			img_np = np.array(img_pil)
-
-			result[i] = img_np
-
-		return result
+		return np.array(cls.downscale(img_pil, scale))
 
 	@classmethod
 	def preprocess(cls, img_pil: Image, scale: float) -> np.ndarray:

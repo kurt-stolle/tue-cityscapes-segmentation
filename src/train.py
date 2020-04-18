@@ -33,9 +33,11 @@ def train_net(net: nn.Module,
 								  cache_dir=cache_dir)
 
 	# Define loaders for each split
-	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True,
-							drop_last=True)
+	# train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+	# val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True,
+	# 						drop_last=True)
+	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, drop_last=True)
 
 	# Use the Tensorboard summary writer
 	# writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
@@ -91,7 +93,7 @@ def train_net(net: nn.Module,
 
 				pbar.update(imgs.shape[0])
 				global_step += 1
-				if global_step % (len(dataset) // (10 * batch_size)) == 0:
+				if global_step % (len(dataset_train) // (10 * batch_size)) == 0:
 					for tag, value in net.named_parameters():
 						tag = tag.replace('.', '/')
 					# writer.add_histogram('weights/' + tag, value.data.cpu().numpy(), global_step)
@@ -105,12 +107,13 @@ def train_net(net: nn.Module,
 					# writer.add_scalar('Loss/test', val_score, global_step)
 					else:
 						logging.info('Validation Dice Coeff: {}'.format(val_score))
-		# writer.add_scalar('Dice/test', val_score, global_step)
+	# writer.add_scalar('Dice/test', val_score, global_step)
 
-	# writer.add_images('images', imgs, global_step)
-	# if net.n_classes == 1:
-	# writer.add_images('masks/true', true_masks, global_step)
-	# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
+
+# writer.add_images('images', imgs, global_step)
+# if net.n_classes == 1:
+# writer.add_images('masks/true', true_masks, global_step)
+# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
 
 
 # if save_cp:
