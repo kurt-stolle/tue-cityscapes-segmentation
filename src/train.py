@@ -19,25 +19,18 @@ def train_net(net: nn.Module,
 			  device,
 			  input_dir: str,
 			  truth_dir: str,
-			  cache_dir: str = None,
 			  epochs=5,
 			  batch_size=1,
 			  lr=0.001,
-			  val_percent=0.1,
 			  save_cp=True,
 			  img_scale=0.5):
 	# Load the validating and training dataset
-	dataset_train = data.Cityscapes(os.sep.join((input_dir, "train")), os.sep.join((truth_dir, "train")), img_scale,
-									cache_dir=cache_dir)
-	dataset_val = data.Cityscapes(os.sep.join((input_dir, "val")), os.sep.join((truth_dir, "val")), img_scale,
-								  cache_dir=cache_dir)
+	dataset_train = data.Cityscapes(os.sep.join((input_dir, "train")), os.sep.join((truth_dir, "train")), img_scale)
+	dataset_val = data.Cityscapes(os.sep.join((input_dir, "val")), os.sep.join((truth_dir, "val")), img_scale)
 
 	# Define loaders for each split
-	# train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-	# val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True,
-	# 						drop_last=True)
-	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, drop_last=True)
+	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
 
 	# Use the Tensorboard summary writer
 	# writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
@@ -94,27 +87,13 @@ def train_net(net: nn.Module,
 				pbar.update(imgs.shape[0])
 				global_step += 1
 				if global_step % (len(dataset_train) // (10 * batch_size)) == 0:
-					for tag, value in net.named_parameters():
-						tag = tag.replace('.', '/')
-					# writer.add_histogram('weights/' + tag, value.data.cpu().numpy(), global_step)
-					# writer.add_histogram('grads/' + tag, value.grad.data.cpu().numpy(), global_step)
 					val_score = net.eval_dice(val_loader, device)
 					scheduler.step(val_score)
-					# writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], global_step)
 
 					if net.n_classes > 1:
 						logging.info('Validation cross entropy: {}'.format(val_score))
-					# writer.add_scalar('Loss/test', val_score, global_step)
 					else:
 						logging.info('Validation Dice Coeff: {}'.format(val_score))
-	# writer.add_scalar('Dice/test', val_score, global_step)
-
-
-# writer.add_images('images', imgs, global_step)
-# if net.n_classes == 1:
-# writer.add_images('masks/true', true_masks, global_step)
-# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
-
 
 # if save_cp:
 # 	try:
@@ -127,15 +106,11 @@ def train_net(net: nn.Module,
 # 	logging.info(f'Checkpoint {epoch + 1} saved !')
 
 
-# writer.close()
-
-
 def get_args():
 	parser = argparse.ArgumentParser(description='Train the UNet on images and target masks',
 									 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 	parser.add_argument('-i', "--input-dir", metavar="INPUT", type=str, required=True)
 	parser.add_argument('-t', "--truth-dir", metavar="TRUTH", type=str, required=True)
-	parser.add_argument('-c', "--cache-dir", type=str, default=None)
 	parser.add_argument('-e', '--epochs', metavar='E', type=int, default=5,
 						help='Number of epochs', dest='epochs')
 	parser.add_argument('-b', '--batch-size', metavar='B', type=int, nargs='?', default=1,
@@ -146,8 +121,6 @@ def get_args():
 						help='Model .pth file')
 	parser.add_argument('-s', '--scale', dest='scale', type=float, default=0.5,
 						help='Downscaling factor of the images')
-	parser.add_argument('-v', '--validation', dest='val', type=float, default=10.0,
-						help='Percent of the data that is used as validation (0-100)')
 
 	return parser.parse_args()
 
@@ -179,12 +152,10 @@ if __name__ == "__main__":
 				  device,
 				  args.input_dir,
 				  args.truth_dir,
-				  cache_dir=args.cache_dir,
 				  epochs=args.epochs,
 				  batch_size=args.batchsize,
 				  lr=args.lr,
-				  img_scale=args.scale,
-				  val_percent=args.val / 100)
+				  img_scale=args.scale)
 	except KeyboardInterrupt:
 		torch.save(net.state_dict(), 'INTERRUPTED.pth')
 		logging.info('Saved interrupt')

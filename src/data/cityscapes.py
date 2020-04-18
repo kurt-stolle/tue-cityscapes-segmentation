@@ -38,17 +38,12 @@ class Cityscapes(Dataset):
 		"ground", "dynamic", "static"  # void
 	)
 
-	def __init__(self, input_dir: str, truth_dir: str, scale=1, cache_dir: str = None):
+	def __init__(self, input_dir: str, truth_dir: str, scale=1):
 		self.input_dir = input_dir
 		self.truth_dir = truth_dir
-		self.cache_dir = cache_dir
 		self.scale = scale
 
 		assert 0 < scale <= 1, "Scale must be between 0 and 1"
-
-		# Create the cache directory if it doesn't exist yet
-		if cache_dir is not None:
-			os.makedirs(self.cache_dir, exist_ok=True)
 
 		# Walk the inputs directory and all each file to our items list
 		self.items = []
@@ -68,30 +63,8 @@ class Cityscapes(Dataset):
 		# Get the sample at index i
 		sample = self.items[i]
 
-		# Allocate as None to help the linter
-		img = None
-		mask = None
-
-		# Check if there is a cache directory
-		if self.cache_dir is not None:
-			fname_cache_img = os.sep.join((self.cache_dir, f"{sample.id}_@{self.scale}x_image.npy"))
-			fname_cache_mask = os.sep.join((self.cache_dir, f"{sample.id}_@{self.scale}x_mask.npy"))
-
-			try:
-				img = np.load(fname_cache_img, allow_pickle=False)
-				mask = np.load(fname_cache_mask, allow_pickle=False)
-			except IOError:
-				img = self.load_image_file(sample)
-				mask = self.load_polygons_file(sample)
-			finally:
-				np.save(fname_cache_img, img, allow_pickle=False)
-				np.save(fname_cache_mask, mask, allow_pickle=False)
-
-			assert img is not None, "Image not loaded correctly, try clearing your cache"
-			assert mask is not None, "Masks not loaded correctly, try clearing your cache"
-		else:
-			img = self.load_image_file(sample)
-			mask = self.load_polygons_file(sample)
+		img = self.load_image_file(sample)
+		mask = self.load_polygons_file(sample)
 
 		assert img[0].shape == mask.shape, \
 			"Image and Masks are not the same shape. Check the ground truth and input image dimensions"

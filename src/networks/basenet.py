@@ -6,14 +6,12 @@ from tqdm import tqdm
 from src import loss
 
 
-class ConvBlock(nn.Module):
+class ConvBlock(nn.Sequential):
 	def __init__(self, in_channels, out_channels, mid_channels=None):
-		super().__init__()
-
 		if not mid_channels:
 			mid_channels = out_channels
 
-		self.double_conv = nn.Sequential(
+		super().__init__(
 			nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
 			nn.BatchNorm2d(mid_channels),
 			nn.ReLU(inplace=True),
@@ -22,20 +20,13 @@ class ConvBlock(nn.Module):
 			nn.ReLU(inplace=True)
 		)
 
-	def forward(self, x):
-		return self.double_conv(x)
 
-
-class DownScale(nn.Module):
+class DownScale(nn.Sequential):
 	def __init__(self, in_channels, out_channels):
-		super().__init__()
-		self.maxpool_conv = nn.Sequential(
+		super().__init__(
 			nn.MaxPool2d(2),
 			ConvBlock(in_channels, out_channels)
 		)
-
-	def forward(self, x):
-		return self.maxpool_conv(x)
 
 
 class UpScale(nn.Module):
@@ -55,20 +46,16 @@ class UpScale(nn.Module):
 		diffY = torch.tensor([x2.size()[2] - x1.size()[2]])
 		diffX = torch.tensor([x2.size()[3] - x1.size()[3]])
 
-		x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-						diffY // 2, diffY - diffY // 2])
+		x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
 
 		x = torch.cat([x2, x1], dim=1)
+
 		return self.conv(x)
 
 
-class OutConv(nn.Module):
+class OutConv(nn.Conv2d):
 	def __init__(self, in_channels, out_channels):
-		super().__init__()
-		self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
-	def forward(self, x):
-		return self.conv(x)
+		super().__init__(in_channels, out_channels, kernel_size=1)
 
 
 class UNet(nn.Module):
@@ -110,26 +97,27 @@ class UNet(nn.Module):
 
 	def eval_dice(self, loader, device):
 		"""Evaluation without the densecrf with the dice coefficient"""
-		self.eval()
-		mask_type = torch.float32 if self.n_classes == 1 else torch.long
-		n_val = len(loader)  # the number of batch
-		tot = 0
+		with torch.no_grad():
+			self.eval()
+			mask_type = torch.float32 if self.n_classes == 1 else torch.long
+			n_val = len(loader)  # the number of batch
+			tot = 0
 
-		with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
-			for batch in loader:
-				imgs, true_masks = batch['image'], batch['mask']
-				imgs = imgs.to(device=device, dtype=torch.float32)
-				true_masks = true_masks.to(device=device, dtype=mask_type)
+			with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
+				for batch in loader:
+					imgs, true_masks = batch['image'], batch['mask']
+					imgs = imgs.to(device=device, dtype=torch.float32)
+					true_masks = true_masks.to(device=device, dtype=mask_type)
 
-				with torch.no_grad():
+					# with torch.no_grad():
 					mask_pred = self(imgs)
 
-				if self.n_classes > 1:
-					tot += F.cross_entropy(mask_pred, true_masks).item()
-				else:
-					pred = torch.sigmoid(mask_pred)
-					pred = (pred > 0.5).float()
-					tot += loss.dice_coeff(pred, true_masks).item()
-				pbar.update()
+					if self.n_classes > 1:
+						tot += F.cross_entropy(mask_pred, true_masks).item()
+					else:
+						pred = torch.sigmoid(mask_pred)
+						pred = (pred > 0.5).float()
+						tot += loss.dice_coeff(pred, true_masks).item()
+					pbar.update()
 
 		return tot / n_val
