@@ -19,23 +19,23 @@ def train_net(net: nn.Module,
 			  device,
 			  input_dir: str,
 			  truth_dir: str,
+			  cache_dir: str = None,
 			  epochs=5,
 			  batch_size=1,
 			  lr=0.001,
 			  val_percent=0.1,
 			  save_cp=True,
 			  img_scale=0.5):
-	# Load the dataset
-	dataset = data.Cityscapes(input_dir, truth_dir, img_scale)
-
-	# Split the dataset
-	n_val = int(len(dataset) * val_percent)
-	n_train = len(dataset) - n_val
-	train, val = random_split(dataset, [n_train, n_val])
+	# Load the validating and training dataset
+	dataset_train = data.Cityscapes(os.sep.join((input_dir, "train")), os.sep.join((truth_dir, "train")), img_scale,
+									cache_dir=cache_dir)
+	dataset_val = data.Cityscapes(os.sep.join((input_dir, "val")), os.sep.join((truth_dir, "val")), img_scale,
+								  cache_dir=cache_dir)
 
 	# Define loaders for each split
-	train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-	val_loader = DataLoader(val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
+	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True,
+							drop_last=True)
 
 	# Use the Tensorboard summary writer
 	# writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
@@ -46,8 +46,8 @@ def train_net(net: nn.Module,
         Epochs:          {epochs}
         Batch size:      {batch_size}
         Learning rate:   {lr}
-        Training size:   {n_train}
-        Validation size: {n_val}
+        Training size:   {len(dataset_train)}
+        Validation size: {len(dataset_val)}
         Checkpoints:     {save_cp}
         Device:          {device.type}
         Images scaling:  {img_scale}
@@ -64,7 +64,7 @@ def train_net(net: nn.Module,
 		net.train()
 
 		epoch_loss = 0
-		with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
+		with tqdm(total=len(dataset_train), desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
 			for batch in train_loader:
 				imgs = batch['image']
 				true_masks = batch['mask']
@@ -105,22 +105,23 @@ def train_net(net: nn.Module,
 					# writer.add_scalar('Loss/test', val_score, global_step)
 					else:
 						logging.info('Validation Dice Coeff: {}'.format(val_score))
-					# writer.add_scalar('Dice/test', val_score, global_step)
+		# writer.add_scalar('Dice/test', val_score, global_step)
 
-				# writer.add_images('images', imgs, global_step)
-				# if net.n_classes == 1:
-				# writer.add_images('masks/true', true_masks, global_step)
-				# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
+	# writer.add_images('images', imgs, global_step)
+	# if net.n_classes == 1:
+	# writer.add_images('masks/true', true_masks, global_step)
+	# writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)
 
-	# if save_cp:
-	# 	try:
-	# 		os.mkdir(dir_checkpoint)
-	# 		logging.info('Created checkpoint directory')
-	# 	except OSError:
-	# 		pass
-	# 	torch.save(net.state_dict(),
-	# 			   dir_checkpoint + f'CP_epoch{epoch + 1}.pth')
-	# 	logging.info(f'Checkpoint {epoch + 1} saved !')
+
+# if save_cp:
+# 	try:
+# 		os.mkdir(dir_checkpoint)
+# 		logging.info('Created checkpoint directory')
+# 	except OSError:
+# 		pass
+# 	torch.save(net.state_dict(),
+# 			   dir_checkpoint + f'CP_epoch{epoch + 1}.pth')
+# 	logging.info(f'Checkpoint {epoch + 1} saved !')
 
 
 # writer.close()
@@ -131,6 +132,7 @@ def get_args():
 									 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 	parser.add_argument('-i', "--input-dir", metavar="INPUT", type=str, required=True)
 	parser.add_argument('-t', "--truth-dir", metavar="TRUTH", type=str, required=True)
+	parser.add_argument('-c', "--cache-dir", type=str, default=None)
 	parser.add_argument('-e', '--epochs', metavar='E', type=int, default=5,
 						help='Number of epochs', dest='epochs')
 	parser.add_argument('-b', '--batch-size', metavar='B', type=int, nargs='?', default=1,
@@ -154,7 +156,7 @@ if __name__ == "__main__":
 	args = get_args()
 
 	# Create the network
-	device = torch.device('cpu')  # 'cuda' if torch.cuda.is_available() else 'cpu')
+	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	logging.info(f'Using device {device}')
 
 	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.labels), bilinear=True)
@@ -174,6 +176,7 @@ if __name__ == "__main__":
 				  device,
 				  args.input_dir,
 				  args.truth_dir,
+				  cache_dir=args.cache_dir,
 				  epochs=args.epochs,
 				  batch_size=args.batchsize,
 				  lr=args.lr,

@@ -16,12 +16,10 @@ class CityscapesSample():
 	"""One sample in the cityscapes dataset"""
 
 	def __init__(self, city: str, seq_id: str, frame_id: str):
-		self.city = city;
-		self.seq_id = seq_id;
+		self.city = city
+		self.seq_id = seq_id
 		self.frame_id = frame_id
-
-	def get_id(self) -> str:
-		return "_".join([self.city, self.seq_id, self.frame_id])
+		self.id = "_".join([city, seq_id, frame_id])
 
 
 class Cityscapes(Dataset):
@@ -29,6 +27,7 @@ class Cityscapes(Dataset):
 
 	__read_reg = r"^(\w+)_(\d+)_(\d+).*.png$"
 
+	"""
 	labels = (
 		"road", "sidewalk", "parking", "rail track",  # flat
 		"person", "rider",  # human
@@ -39,14 +38,24 @@ class Cityscapes(Dataset):
 		"sky",  # sky
 		"ground", "dynamic", "static"  # void
 	)
+	"""
+	labels = (
+		"ground", "sky", "road", "car"
+	)
 
-	def __init__(self, input_dir: str, truth_dir: str, scale=1):
+	def __init__(self, input_dir: str, truth_dir: str, scale=1, cache_dir: str = None):
 		self.input_dir = input_dir
 		self.truth_dir = truth_dir
+		self.cache_dir = cache_dir
 		self.scale = scale
 
 		assert 0 < scale <= 1, "Scale must be between 0 and 1"
 
+		# Create the cache directory if it doesn't exist yet
+		if cache_dir is not None:
+			os.makedirs(self.cache_dir, exist_ok=True)
+
+		# Walk the inputs directory and all each file to our items list
 		self.items = []
 		for (_, _, filenames) in os.walk(self.input_dir):
 			for filename in filenames:
@@ -63,27 +72,55 @@ class Cityscapes(Dataset):
 	def __getitem__(self, i: int) -> Dict[str, torch.Tensor]:
 		# Get the sample at index i
 		sample = self.items[i]
-		sample_id = sample.get_id()
 
-		# Preprocess the truth
-		with open(os.sep.join([self.truth_dir, sample.city, sample_id + "_gtFine_polygons.json"])) as f:
-			data = json.load(f)
-			mask = self.preprocess_polygons(data, self.scale)
+		# Allocate as None to help the linter
+		img = None
+		mask = None
 
-		# Preprocess the image
-		input_file = glob(os.sep.join([self.input_dir, sample.city, sample_id + "_leftImg8bit.png"]))
-		assert len(input_file) == 1, \
-			f'Either no image or multiple images found for the ID {sample_id}: {input_file}'
+		# Check if there is a cache directory
+		if self.cache_dir is not None:
+			fname_cache_img = os.sep.join((self.cache_dir, sample.id + "_image.npy"))
+			fname_cache_mask = os.sep.join((self.cache_dir, sample.id + "_mask.npy"))
 
-		img = self.preprocess(Image.open(input_file[0]), self.scale)
+			try:
+				img = np.load(fname_cache_img, allow_pickle=False)
+				mask = np.load(fname_cache_mask, allow_pickle=False)
+			except IOError:
+				img = self.load_image_file(sample)
+				mask = self.load_polygons_file(sample)
+			finally:
+				np.save(fname_cache_img, img, allow_pickle=False)
+				np.save(fname_cache_mask, mask, allow_pickle=False)
 
-		# assert img.size == mask.size, \
-		# 	f'Image and mask {sample_id} should be the same size, but are {img.size} and {mask.size}'
+			assert img is not None, "Image not loaded correctly, try clearing your cache"
+			assert mask is not None, "Masks not loaded correctly, try clearing your cache"
+		else:
+			img = self.load_image_file(sample)
+			mask = self.load_polygons_file(sample)
+
+		assert img[0].shape == mask[0].shape, \
+			"Image and Masks are not the same shape. Check the ground truth and input image dimensions"
 
 		return {'image': torch.from_numpy(img), 'mask': torch.from_numpy(mask)}
 
+	def load_polygons_file(self, sample: CityscapesSample) -> np.ndarray:
+		"""load ground truths from polygons as a NumPY array, taking into account our scaling factor"""
+		with open(os.sep.join([self.truth_dir, sample.city, sample.id + "_gtFine_polygons.json"])) as f:
+			data = json.load(f)
+
+		return self.preprocess_polygons(data, self.scale)
+
+	def load_image_file(self, sample: CityscapesSample) -> np.ndarray:
+		"""load an image file and parse to a NumPY array, taking into account our scaling factor"""
+		input_file = glob(os.sep.join([self.input_dir, sample.city, sample.id + "_leftImg8bit.png"]))
+		assert len(input_file) == 1, \
+			f'Either no image or multiple images found for the ID {sample.id}: {input_file}'
+
+		return self.preprocess(Image.open(input_file[0]), self.scale)
+
 	@staticmethod
 	def downscale(img_pil: Image, scale: float) -> Image:
+		"""downscale a PIL image"""
 		# Image scaling
 		w, h = img_pil.size
 		w, h = int(scale * w), int(scale * h)
@@ -94,6 +131,8 @@ class Cityscapes(Dataset):
 
 	@classmethod
 	def preprocess_polygons(cls, data: Dict, scale: float) -> (np.ndarray):
+		"""preprocess a polygons file to an array of masks"""
+
 		# Read the size from the data object
 		size = (data["imgWidth"], data["imgHeight"])
 
@@ -105,7 +144,7 @@ class Cityscapes(Dataset):
 			try:
 				i = cls.labels.index(obj["label"])
 			except ValueError:
-				#logging.warning(f"""Polygons file contains unexpected label {obj["label"]}""")
+				# logging.warning(f"""Polygons file contains unexpected label {obj["label"]}""")
 				continue
 
 			# flatten the array, [[x1,y1],[x2,y2]] -> [x1,y1,x2,x2]
@@ -127,6 +166,8 @@ class Cityscapes(Dataset):
 
 	@classmethod
 	def preprocess(cls, img_pil: Image, scale: float) -> np.ndarray:
+		"""preprocess an image file to an array of channels"""
+
 		# Convert to numpy 3d array
 		img_np = np.array(cls.downscale(img_pil, scale))
 

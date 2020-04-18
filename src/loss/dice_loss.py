@@ -1,8 +1,7 @@
 import torch
-from torch.autograd import Function
 
 
-class DiceCoeff(Function):
+class DiceCoeff(torch.autograd.Function):
 	"""Dice coeff for individual examples"""
 
 	def forward(self, input, target):
