@@ -15,7 +15,7 @@ from src import networks
 from src import data
 
 
-def train_net(net: nn.Module,
+def train_net(model: nn.Module,
 			  device,
 			  input_dir: str,
 			  truth_dir: str,
@@ -29,11 +29,10 @@ def train_net(net: nn.Module,
 	dataset_val = data.Cityscapes(os.sep.join((input_dir, "val")), os.sep.join((truth_dir, "val")), img_scale)
 
 	# Define loaders for each split
-	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
+	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=False)
+	val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=False, drop_last=True)
 
-	# Use the Tensorboard summary writer
-	# writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
+	# Count steps
 	global_step = 0
 
 	# Logging
@@ -48,49 +47,45 @@ def train_net(net: nn.Module,
         Images scaling:  {img_scale}
     ''')
 
-	optimizer = optim.RMSprop(net.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
-	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min' if net.n_classes > 1 else 'max', patience=2)
-	if net.n_classes > 1:
-		criterion = nn.CrossEntropyLoss()
-	else:
-		criterion = nn.BCEWithLogitsLoss()
+	#optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
+	optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-8, )
+	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min' if model.n_classes > 1 else 'max', patience=2)
+	criterion = nn.CrossEntropyLoss()
 
 	for epoch in range(epochs):
-		net.train()
+		model.train()
 
 		epoch_loss = 0
 		with tqdm(total=len(dataset_train), desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
 			for batch in train_loader:
 				imgs = batch['image']
 				true_masks = batch['mask']
-				assert imgs.shape[1] == net.n_channels, \
-					f'Network has been defined with {net.n_channels} input channels, ' \
+				assert imgs.shape[1] == model.n_channels, \
+					f'Network has been defined with {model.n_channels} input channels, ' \
 					f'but loaded images have {imgs.shape[1]} channels. Please check that ' \
 					'the images are loaded correctly.'
 
 				imgs = imgs.to(device=device, dtype=torch.float32)
-				mask_type = torch.float32 if net.n_classes == 1 else torch.long
-				true_masks = true_masks.to(device=device, dtype=mask_type)
+				true_masks = true_masks.to(device=device, dtype=torch.long)
 
-				masks_pred = net(imgs)
+				masks_pred = model(imgs)
 				loss = criterion(masks_pred, true_masks)
 				epoch_loss += loss.item()
-				# writer.add_scalar('Loss/train', loss.item(), global_step)
 
 				pbar.set_postfix(**{'loss (batch)': loss.item()})
 
 				optimizer.zero_grad()
 				loss.backward()
-				nn.utils.clip_grad_value_(net.parameters(), 0.1)
+				nn.utils.clip_grad_value_(model.parameters(), 0.1)
 				optimizer.step()
 
 				pbar.update(imgs.shape[0])
 				global_step += 1
 				if global_step % (len(dataset_train) // (10 * batch_size)) == 0:
-					val_score = net.eval_dice(val_loader, device)
+					val_score = model.eval_dice(val_loader, device)
 					scheduler.step(val_score)
 
-					if net.n_classes > 1:
+					if model.n_classes > 1:
 						logging.info('Validation cross entropy: {}'.format(val_score))
 					else:
 						logging.info('Validation Dice Coeff: {}'.format(val_score))
