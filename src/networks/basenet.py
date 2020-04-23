@@ -59,9 +59,12 @@ class OutConv(nn.Conv2d):
 class UNet(nn.Module):
 	def __init__(self, n_channels, n_classes, bilinear=True):
 		super().__init__()
+		self.n_channels = n_channels
+		self.n_classes = n_classes
 		self.bilinear = bilinear
 
 		self.inc = ConvBlock(n_channels, 64)
+
 		self.down1 = DownScale(64, 128)
 		self.down2 = DownScale(128, 256)
 		self.down3 = DownScale(256, 512)
@@ -69,42 +72,29 @@ class UNet(nn.Module):
 		factor = 2 if bilinear else 1
 
 		self.down4 = DownScale(512, 1024 // factor)
+
 		self.up1 = UpScale(1024, 512, bilinear)
 		self.up2 = UpScale(512, 256, bilinear)
 		self.up3 = UpScale(256, 128, bilinear)
 		self.up4 = UpScale(128, 64 * factor, bilinear)
+
 		self.outc = OutConv(64, n_classes)
 
 	def forward(self, x):
-		x1 = self.inc(x)
-		x2 = self.down1(x1)
-		x3 = self.down2(x2)
-		x4 = self.down3(x3)
-		x5 = self.down4(x4)
+		xi = self.inc(x)
 
-		x = self.up1(x5, x4)
-		x = self.up2(x, x3)
-		x = self.up3(x, x2)
-		x = self.up4(x, x1)
+		xd1 = self.down1(xi)
+		xd2 = self.down2(xd1)
+		xd3 = self.down3(xd2)
+		xd4 = self.down4(xd3)
 
-		logits = self.outc(x)
+		xu1 = self.up1(xd4, xd3)
+		xu2 = self.up2(xu1, xd2)
+		xu3 = self.up3(xu2, xd1)
+		xu4 = self.up4(xu3, xi)
+
+		logits = self.outc(xu4)
 
 		return logits
 
-	def eval_dice(self, loader, device):
-		"""Evaluation against a loader"""
-		self.eval()
-		n_val = len(loader)  # the number of batch
-		tot = 0
-		with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
-			for batch in loader:
-				imgs, true_masks = batch['image'], batch['mask']
-				imgs = imgs.to(device=device, dtype=torch.float32)
-				true_masks = true_masks.to(device=device, dtype=torch.long)
 
-				with torch.no_grad():
-					mask_pred = self(imgs)
-				tot += F.cross_entropy(mask_pred, true_masks).item()
-				pbar.update()
-
-		return tot / n_val

@@ -14,10 +14,16 @@
 \usepackage{threeparttable}
 
 % Tikz - used to draw diagrams
-\usepackage{tikz,pgfplots}
+\usepackage{tikz}
 \usetikzlibrary{shapes}
 \usetikzlibrary{arrows}
-\pgfplotsset{compat=1.3}
+
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+
+\usepgfplotslibrary{external} 
+\tikzexternalize
+\pgfplotsset{compat=newest}
 \fboxsep=0pt
 
 % References and clickable refs

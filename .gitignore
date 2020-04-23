@@ -131,20 +131,14 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.out
+paper/*.synctex.gz
+paper/*.md5
+paper/*.auxlock
+paper/*.pgf-plot.gnuplot
 
-
-paper/main.aux
-
-paper/main.bbl
-
-paper/main.blg
-
-paper/main.fdb_latexmk
-
-paper/main.fls
-
-paper/main.out
-
-paper/main.pdf
-
-paper/main.synctex.gz
