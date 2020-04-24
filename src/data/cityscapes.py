@@ -115,16 +115,6 @@ class Cityscapes(Dataset):
 		img = self.downscale(img, self.scale)
 		mask = self.downscale(mask, self.scale)
 
-		jitter = T.ColorJitter.get_params((-0.1, 0.1), (-0.1, 0.1), (-0.1, 0.1), (-0.1, 0.1))
-		img = jitter(img)
-		#
-		# rotation = random.random() * 10
-		# img = TF.rotate(img, rotation, expand=True)
-		# mask = TF.rotate(img, rotation, expand=True)
-		#
-		# if random.random() > 0.9:
-		# 	img = TF.to_grayscale(img, 3)
-
 		if random.random() > 0.5:
 			img = TF.hflip(img)
 			mask = TF.hflip(mask)
