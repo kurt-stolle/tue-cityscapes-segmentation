@@ -60,6 +60,8 @@ class Cityscapes(Dataset):
 				if match:
 					self.items.append(CityscapesSample(match.group(1), match.group(2), match.group(3)))
 
+		assert len(self.items) > 0, f"No items found in {self.input_dir}"
+
 		random.seed(1958)
 
 		logging.info(f'Loading cityscapes dataset with {len(self.items)} samples')
@@ -72,9 +74,17 @@ class Cityscapes(Dataset):
 		sample = self.items[i]
 
 		img = self.load_image_file(sample)
-		mask = self.load_polygons_file(sample)
+		mask = self.load_colored_image(sample)
+		#mask = self.load_polygons_file(sample)
 
 		return self.transform(img, mask)
+
+	def load_colored_image(self, sample:CityscapesSample) -> Image:
+		input_file = glob(os.sep.join([self.truth_dir, sample.city, sample.id + "_gtFine_color.png"]))
+		assert len(input_file) == 1, \
+			f'Either no image or multiple images found for the ID {sample.id}: {input_file}'
+
+		return Image.open(input_file[0])
 
 	def load_polygons_file(self, sample: CityscapesSample) -> Image:
 		"""load ground truths from polygons as a NumPY array, taking into account our scaling factor"""
@@ -115,6 +125,9 @@ class Cityscapes(Dataset):
 	def transform(self, img: Image, mask: Image) -> (torch.Tensor, torch.Tensor):
 		"""perform data augmentation"""
 
+		img = img.convert("RGB")
+		mask = mask.convert("RGB")
+
 		img = self.downscale(img, self.scale)
 		mask = self.downscale(mask, self.scale)
 
@@ -122,10 +135,16 @@ class Cityscapes(Dataset):
 			img = TF.hflip(img)
 			mask = TF.hflip(mask)
 
-		img = TF.to_tensor(img)
-		mask = torch.from_numpy(np.array(mask))
 
-		return img, mask
+		img = TF.to_tensor(img)
+
+		mask = torch.from_numpy(np.array(mask)).permute((2,0,1))
+		target = torch.zeros((img.shape[1], img.shape[2]), dtype=torch.uint8)
+		for i,c in enumerate(self.classes):
+			eq = mask[0].eq(c.color[0]) & mask[1].eq(c.color[1]) & mask[2].eq(c.color[2])
+			target += eq * i
+
+		return img, target
 
 	@staticmethod
 	def downscale(img_pil: Image, scale: float) -> Image:
@@ -164,8 +183,6 @@ class Cityscapes(Dataset):
 			target[0] += eq * lbl.color[0]
 			target[1] += eq * lbl.color[1]
 			target[2] += eq * lbl.color[2]
-
-			print(f"found {eq.sum().item()} pixels with label {lbl.name}")
 
 		print("converting to PIL image")
 

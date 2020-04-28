@@ -142,3 +142,4 @@ paper/*.md5
 paper/*.auxlock
 paper/*.pgf-plot.gnuplot
 
+/output.png

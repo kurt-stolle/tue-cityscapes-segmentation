@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+from torch.utils.checkpoint import checkpoint
 
 
 class ConvBlock(nn.Sequential):
@@ -41,8 +42,8 @@ class UpScale(nn.Module):
 	def forward(self, x1, x2):
 		x1 = self.up(x1)
 		# input is CHW
-		diffY = torch.tensor([x2.size()[2] - x1.size()[2]])
-		diffX = torch.tensor([x2.size()[3] - x1.size()[3]])
+		diffY = x2.size()[2] - x1.size()[2]
+		diffX = x2.size()[3] - x1.size()[3]
 
 		x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
 
@@ -63,27 +64,27 @@ class UNet(nn.Module):
 		self.n_classes = n_classes
 		self.bilinear = bilinear
 
-		self.inc = ConvBlock(n_channels, 64)
+		self.inc = ConvBlock(n_channels, 32)
 
-		self.down1 = DownScale(64, 128)
-		self.down2 = DownScale(128, 256)
-		self.down3 = DownScale(256, 512)
+		self.down1 = DownScale(32, 64)
+		self.down2 = DownScale(64, 128)
+		self.down3 = DownScale(128, 256)
 
 		factor = 2 if bilinear else 1
 
-		self.down4 = DownScale(512, 1024 // factor)
+		self.down4 = DownScale(256, 512 // factor)
 
-		self.up1 = UpScale(1024, 512, bilinear)
-		self.up2 = UpScale(512, 256, bilinear)
-		self.up3 = UpScale(256, 128, bilinear)
-		self.up4 = UpScale(128, 64 * factor, bilinear)
+		self.up1 = UpScale(512, 256, bilinear)
+		self.up2 = UpScale(256, 128, bilinear)
+		self.up3 = UpScale(128, 64, bilinear)
+		self.up4 = UpScale(64, 32 * factor, bilinear)
 
-		self.outc = OutConv(64, n_classes)
+		self.outc = OutConv(32, n_classes)
 
 	def forward(self, x):
 		xi = self.inc(x)
 
-		xd1 = self.down1(xi)
+		xd1 = checkpoint(self.down1, xi)
 		xd2 = self.down2(xd1)
 		xd3 = self.down3(xd2)
 		xd4 = self.down4(xd3)
@@ -91,10 +92,8 @@ class UNet(nn.Module):
 		xu1 = self.up1(xd4, xd3)
 		xu2 = self.up2(xu1, xd2)
 		xu3 = self.up3(xu2, xd1)
-		xu4 = self.up4(xu3, xi)
+		xu4 = checkpoint(self.up4, xu3, xi)
 
 		logits = self.outc(xu4)
 
 		return logits
-
-

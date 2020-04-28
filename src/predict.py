@@ -75,10 +75,6 @@ def get_output_filenames(args):
 	return out_files
 
 
-def mask_to_image(mask):
-	return Image.fromarray((mask * 255).astype(np.uint8))
-
-
 if __name__ == "__main__":
 	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 

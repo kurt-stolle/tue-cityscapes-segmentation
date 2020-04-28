@@ -53,8 +53,8 @@ def train_net(model: nn.Module,
 
 	# Collect metrics from the model
 	metrics = {}
-	metrics["train_acc"] = []
-	metrics["val_acc"] = []
+	metrics["train_iou"] = []
+	metrics["val_iou"] = []
 	metrics["train_loss"] = []
 	metrics["val_loss"] = []
 
@@ -75,18 +75,17 @@ def train_net(model: nn.Module,
 				masks_pred = model(imgs)
 
 				loss = criterion(masks_pred, true_masks)
-				loss_item = float(loss.item())
+				loss_item = loss.item()
 
-				tp = iou.IoU(masks_pred, true_masks, device=device)
-
-				pbar.set_postfix(**{'tp': tp.item()})
+				pbar.set_postfix(**{'loss': loss_item})
 				pbar.update(imgs.shape[0])
 
 				metrics["train_loss"].append((global_step, loss_item))
+				metrics["train_iou"].append((global_step, iou.IoU(masks_pred, true_masks, device=device).item()))
 
 				optimizer.zero_grad()
 				loss.backward()
-				#  nn.utils.clip_grad_value_(model.parameters(), 0.1)
+				nn.utils.clip_grad_value_(model.parameters(), 0.1)
 				optimizer.step()
 
 				global_step += 1
@@ -95,7 +94,8 @@ def train_net(model: nn.Module,
 		net.eval()
 
 		n_val = len(dataset_val) // batch_size  # the number of batch
-		tot = 0
+		tot_loss = 0
+		tot_iou = 0
 		with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
 			for imgs, true_masks in val_loader:
 				imgs = imgs.to(device=device, dtype=torch.float32)
@@ -104,14 +104,17 @@ def train_net(model: nn.Module,
 				with torch.no_grad():
 					mask_pred = net(imgs)
 
-				tot += float(F.cross_entropy(mask_pred, true_masks).item())
+				tot_loss += F.cross_entropy(mask_pred, true_masks).item()
+				tot_iou += iou.IoU(masks_pred, true_masks, device=device).item()
 
 				pbar.update()
 
-		val_score = tot / n_val
+		val_score = tot_loss / n_val
+		iou_score = tot_iou / n_val
 		scheduler.step(val_score)
 
 		metrics["val_loss"].append((global_step, val_score))
+		metrics["val_iou"].append((global_step, iou_score))
 
 		logging.info('Validation cross entropy: {}'.format(val_score))
 
@@ -172,7 +175,7 @@ def get_args():
 def save_csv(path: str, l: List):
 	with open(path, 'w', newline='') as f:
 		w = csv.writer(f)
-		w.writerow(("global_step", "metrics"))
+		w.writerow(("global_step", "value"))
 		w.writerows(l)
 
 
@@ -225,6 +228,8 @@ if __name__ == "__main__":
 			os.makedirs(args.metrics_dir, exist_ok=True)
 			save_csv(os.path.join(args.metrics_dir, "train_loss.csv"), metrics["train_loss"])
 			save_csv(os.path.join(args.metrics_dir, "val_loss.csv"), metrics["val_loss"])
+			save_csv(os.path.join(args.metrics_dir, "train_iou.csv"), metrics["train_iou"])
+			save_csv(os.path.join(args.metrics_dir, "val_iou.csv"), metrics["val_iou"])
 
 			logging.info(f"Saved metrics in {args.metrics_dir}")
 	except KeyboardInterrupt:
