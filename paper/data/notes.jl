@@ -23,3 +23,6 @@ function plot_train_val(batch_size, samples,fname_train, fname_val)
 end
 
 plot_train_val(2,2975,"baseline/train_loss_lr0-01.csv","baseline/val_loss_lr0-01.csv")
+title!("Baseline")
+plot_train_val(2,2975,"augment/train_loss_hflip.csv", "augment/val_loss_hflip.csv")
+title!("Augment hflip")

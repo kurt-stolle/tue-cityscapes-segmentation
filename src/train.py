@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from src import networks
 from src import data
+from src import iou
 
 
 def train_net(model: nn.Module,
@@ -28,7 +29,7 @@ def train_net(model: nn.Module,
 			  epochs=10,
 			  batch_size=1,
 			  lr=0.01,
-			  save_cp=True):
+			  checkpoint_dir=None):
 	# Load the network to the device
 	net.to(device=device)
 
@@ -38,7 +39,8 @@ def train_net(model: nn.Module,
 							drop_last=True)
 
 	# Logging
-	logging.info(f"Starting training with params:\n\t- Epochs = {epochs}\n\t- Batch Size = {batch_size}\n\t- Learnig Rate = {lr}")
+	logging.info(
+		f"Starting training with params:\n\t- Epochs = {epochs}\n\t- Batch Size = {batch_size}\n\t- Learnig Rate = {lr}")
 
 	# Define our optimization strategy
 	# optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
@@ -75,7 +77,9 @@ def train_net(model: nn.Module,
 				loss = criterion(masks_pred, true_masks)
 				loss_item = float(loss.item())
 
-				pbar.set_postfix(**{'loss (batch)': loss_item})
+				tp = iou.IoU(masks_pred, true_masks, device=device)
+
+				pbar.set_postfix(**{'tp': tp.item()})
 				pbar.update(imgs.shape[0])
 
 				metrics["train_loss"].append((global_step, loss_item))
@@ -109,23 +113,17 @@ def train_net(model: nn.Module,
 
 		metrics["val_loss"].append((global_step, val_score))
 
-		if model.n_classes > 1:
-			logging.info('Validation cross entropy: {}'.format(val_score))
-		else:
-			logging.info('Validation Dice Coeff: {}'.format(val_score))
+		logging.info('Validation cross entropy: {}'.format(val_score))
+
+		# Save checkpoint
+		if checkpoint_dir is not None:
+			os.makedirs(checkpoint_dir, exist_ok=True)
+			torch.save(net.state_dict(),
+					   os.path.join(checkpoint_dir, f"{epoch+1}.pth"))
+
+			logging.info(f'Checkpoint {epoch + 1} saved !')
 
 	return metrics
-
-
-# if save_cp:
-# 	try:
-# 		os.mkdir(dir_checkpoint)
-# 		logging.info('Created checkpoint directory')
-# 	except OSError:
-# 		pass
-# 	torch.save(net.state_dict(),
-# 			   dir_checkpoint + f'CP_epoch{epoch + 1}.pth')
-# 	logging.info(f'Checkpoint {epoch + 1} saved !')
 
 
 def get_args():
@@ -133,10 +131,6 @@ def get_args():
 									 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 	parser.add_argument('-i', "--input-dir",
 						metavar="INPUT",
-						type=str,
-						required=True)
-	parser.add_argument('-t', "--truth-dir",
-						metavar="TRUTH",
 						type=str,
 						required=True)
 	parser.add_argument('-d', "--metrics-dir",
@@ -178,7 +172,7 @@ def get_args():
 def save_csv(path: str, l: List):
 	with open(path, 'w', newline='') as f:
 		w = csv.writer(f)
-		w.writerow(("global_step", "loss"))
+		w.writerow(("global_step", "metrics"))
 		w.writerows(l)
 
 
@@ -192,7 +186,7 @@ if __name__ == "__main__":
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	logging.info(f'Using device {device}')
 
-	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.labels), bilinear=True)
+	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.classes), bilinear=True)
 
 	if args.model:
 		net.load_state_dict(
@@ -203,10 +197,16 @@ if __name__ == "__main__":
 	# cudnn.benchmark = True
 
 	# Load the validating and training dataset
-	dataset_train = \
-		data.Cityscapes(os.sep.join((args.input_dir, "train")), os.sep.join((args.truth_dir, "train")), args.scale)
-	dataset_val = \
-		data.Cityscapes(os.sep.join((args.input_dir, "val")), os.sep.join((args.truth_dir, "val")), args.scale)
+	dataset_train = data.Cityscapes(
+		os.sep.join((args.input_dir, "leftImg8bit", "train")),
+		os.sep.join((args.input_dir, "gtFine", "train")),
+		args.scale
+	)
+	dataset_val = data.Cityscapes(
+		os.sep.join((args.input_dir, "leftImg8bit", "val")),
+		os.sep.join((args.input_dir, "gtFine", "val")),
+		args.scale
+	)
 
 	# Start training
 	try:
@@ -216,7 +216,8 @@ if __name__ == "__main__":
 							dataset_val,
 							epochs=args.epochs,
 							batch_size=args.batchsize,
-							lr=args.lr)
+							lr=args.lr,
+							checkpoint_dir=os.path.join(args.metrics_dir, "cp"))
 
 		if args.metrics_dir is None:
 			print("Not saving metrics")

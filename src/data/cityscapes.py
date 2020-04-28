@@ -11,9 +11,11 @@ from glob import glob
 from torch.utils.data import Dataset
 from PIL import Image, ImageDraw
 import torchvision.transforms.functional as TF
-from typing import Dict
+from typing import Dict, Tuple
 
 import torchvision.transforms as T
+
+from torchvision.datasets import Cityscapes as C
 
 
 class CityscapesSample():
@@ -26,21 +28,21 @@ class CityscapesSample():
 		self.id = "_".join([city, seq_id, frame_id])
 
 
+class Label():
+	def __init__(self, name, color=(0, 0, 0)):
+		self.name = name
+		self.color = color
+
+	def __eq__(self, other):
+		return other == self.name
+
+
 class Cityscapes(Dataset):
 	"""The Cityscapes dataset, see: https://www.cityscapes-dataset.com/"""
 
 	__read_reg = r"^(\w+)_(\d+)_(\d+).*.png$"
 
-	labels = (
-		"road", "sidewalk", "parking", "rail track",  # flat
-		"person", "rider",  # human
-		"car", "truck", "bus", "on rails", "motorcycle", "bicycle", "caravan", "trailer",  # vehicle
-		"building", "wall", "fence", "guard rail", "bridge", "tunnel",  # construction
-		"pole", "pole group", "traffic sign", "traffic light",  # object
-		"vegetation", "terrain",  # nature
-		"sky",  # sky
-		"ground", "dynamic", "static"  # void
-	)
+	classes = [c for i, c in enumerate(C.classes) if i == 0 or not c.ignore_in_eval]
 
 	def __init__(self, input_dir: str, truth_dir: str, scale=1):
 		self.input_dir = input_dir
@@ -83,21 +85,22 @@ class Cityscapes(Dataset):
 		size = (data["imgWidth"], data["imgHeight"])
 
 		# Create a buffer 3d-array HW
-		img_pil = Image.new('L', size, -1)
+		img_pil = Image.new('L', size, 0)
+		img_pil_draw = ImageDraw.Draw(img_pil)
 
 		# Iterate over the objects in the polygon data
 		for obj in data["objects"]:
-			try:
-				i = self.labels.index(obj["label"])
-			except ValueError:
-				# logging.warning(f"""Polygons file contains unexpected label {obj["label"]}""")
-				continue
+			for i, c in enumerate(self.classes):
+				if c.name != obj["label"]:
+					continue
 
-			# flatten the array, [[x1,y1],[x2,y2]] -> [x1,y1,x2,x2]
-			polygon = [item for sublist in obj["polygon"] for item in sublist]
+				# flatten the array, [[x1,y1],[x2,y2]] -> [x1,y1,x2,x2]
+				polygon = [item for sublist in obj["polygon"] for item in sublist]
 
-			# use PIL to make an image on which we can draw the array
-			ImageDraw.Draw(img_pil).polygon(polygon, outline=i, fill=i)
+				# use PIL to make an image on which we can draw the array
+				img_pil_draw.polygon(polygon, outline=i, fill=i)
+
+				break
 
 		return img_pil
 
@@ -134,3 +137,36 @@ class Cityscapes(Dataset):
 		assert w > 0 and h > 0, 'Scale is too small'
 
 		return img_pil.resize((w, h), resample=Image.NEAREST)
+
+	@staticmethod
+	def masks_to_indices(masks: torch.Tensor, threshold=0.2) -> torch.Tensor:
+		vals, indices = masks.softmax(dim=1).max(dim=1)
+
+		return indices * vals.gt(threshold)
+
+	@classmethod
+	def to_image(cls, masks: torch.Tensor) -> Image:
+		"""Converts a tensor([1, class_index, with, height] = logit) to an image"""
+
+		assert masks.shape[0] == 1, f"Image conversion only works on a single masks collection (shape = {masks.shape})"
+		assert masks.shape[1] == len(cls.classes), f"The masks Tensor's first dimension (shape = {masks.shape}) " \
+												   f"does not match the amount of labels ({len(cls.classes)})"
+
+		indices = cls.masks_to_indices(masks).squeeze(0)
+
+		target = torch.zeros((3, masks.shape[2], masks.shape[3]),
+							 dtype=torch.uint8, device=indices.device, requires_grad=False)
+
+		print("matching pixels with classes")
+		for i, lbl in enumerate(cls.classes):
+			eq = indices.eq(i)
+
+			target[0] += eq * lbl.color[0]
+			target[1] += eq * lbl.color[1]
+			target[2] += eq * lbl.color[2]
+
+			print(f"found {eq.sum().item()} pixels with label {lbl.name}")
+
+		print("converting to PIL image")
+
+		return TF.to_pil_image(target.cpu(), 'RGB')
