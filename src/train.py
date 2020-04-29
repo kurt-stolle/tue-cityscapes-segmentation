@@ -5,12 +5,10 @@ import csv
 import logging
 import os
 import sys
-from timeit import timeit
 from typing import List
 
 import torch
 from torch import nn, optim
-# from torch.utils.tensorboard import SummaryWriter
 from torch.backends import cudnn
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
@@ -44,9 +42,10 @@ def train_net(model: nn.Module,
 
 	# Define our optimization strategy
 	# optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
-	optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-8, )
+	optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-8 )
 	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
 	criterion = nn.CrossEntropyLoss()
+
 
 	# Count steps
 	global_step = 0
@@ -122,7 +121,7 @@ def train_net(model: nn.Module,
 		if checkpoint_dir is not None:
 			os.makedirs(checkpoint_dir, exist_ok=True)
 			torch.save(net.state_dict(),
-					   os.path.join(checkpoint_dir, f"{epoch+1}.pth"))
+					   os.path.join(checkpoint_dir, f"{epoch + 1}.pth"))
 
 			logging.info(f'Checkpoint {epoch + 1} saved !')
 
@@ -197,7 +196,9 @@ if __name__ == "__main__":
 		)
 		logging.info(f'Model loaded from {args.model}')
 
-	# cudnn.benchmark = True
+	cudnn.benchmark = True
+
+
 
 	# Load the validating and training dataset
 	dataset_train = data.Cityscapes(

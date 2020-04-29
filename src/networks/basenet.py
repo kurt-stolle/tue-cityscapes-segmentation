@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import get_device_states, check_backward_validity, CheckpointFunction
 from tqdm import tqdm
-from torch.utils.checkpoint import checkpoint
 
 
 class ConvBlock(nn.Sequential):
@@ -82,17 +82,17 @@ class UNet(nn.Module):
 		self.outc = OutConv(32, n_classes)
 
 	def forward(self, x):
-		xi = self.inc(x)
+		xi = CheckpointFunction.apply(self.inc, True, x)
 
-		xd1 = checkpoint(self.down1, xi)
+		xd1 = self.down1(xi)
 		xd2 = self.down2(xd1)
 		xd3 = self.down3(xd2)
 		xd4 = self.down4(xd3)
 
 		xu1 = self.up1(xd4, xd3)
-		xu2 = self.up2(xu1, xd2)
+		xu2 = CheckpointFunction.apply(self.up2, True, xu1, xd2)
 		xu3 = self.up3(xu2, xd1)
-		xu4 = checkpoint(self.up4, xu3, xi)
+		xu4 = self.up4(xu3, xi)
 
 		logits = self.outc(xu4)
 
