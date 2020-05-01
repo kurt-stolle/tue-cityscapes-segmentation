@@ -9,7 +9,7 @@ import random
 
 from glob import glob
 from torch.utils.data import Dataset
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 import torchvision.transforms.functional as TF
 from typing import Dict, Tuple
 
@@ -44,7 +44,11 @@ class Cityscapes(Dataset):
 
 	classes = [c for i, c in enumerate(C.classes) if i == 0 or not c.ignore_in_eval]
 
+	sample_size = (int(256), int(512))
+	crop_padding = int(10)
+
 	def __init__(self, input_dir: str, truth_dir: str, scale=1):
+
 		self.input_dir = input_dir
 		self.truth_dir = truth_dir
 		self.scale = scale
@@ -122,46 +126,46 @@ class Cityscapes(Dataset):
 
 		return Image.open(input_file[0])
 
-	def transform(self, img: Image, mask: Image) -> (torch.Tensor, torch.Tensor):
+	@classmethod
+	def transform(cls, img: Image, mask: Image) -> (torch.Tensor, torch.Tensor):
 		"""perform data augmentation"""
 
 		img = img.convert("RGB")
+		img = img.filter(ImageFilter.SHARPEN)
+		#  img.putalpha(img.filter(ImageFilter.FIND_EDGES).convert("L"))
+
+		if mask is None:
+			return TF.to_tensor(TF.resize(img, cls.sample_size)), None
+
 		mask = mask.convert("RGB")
 
-		img = self.downscale(img, self.scale)
-		mask = self.downscale(mask, self.scale)
+		img = TF.resize(img,cls.sample_size, interpolation=Image.BILINEAR)
+		mask = TF.resize(mask, cls.sample_size, interpolation=Image.NEAREST)
 
 		if random.random() > 0.5:
 			img = TF.hflip(img)
 			mask = TF.hflip(mask)
 
-
+		# Transform the Img to a CHW-dimensional Tensor
 		img = TF.to_tensor(img)
 
+		# Transform the mask from an image with RGB-colors to an 1-channel image with the index of the class as value
+		mask_size = [s for s in cls.sample_size]
+		mask = TF.resize(mask, mask_size, Image.NEAREST)
 		mask = torch.from_numpy(np.array(mask)).permute((2,0,1))
-		target = torch.zeros((img.shape[1], img.shape[2]), dtype=torch.uint8)
-		for i,c in enumerate(self.classes):
+		target = torch.zeros(mask_size, dtype=torch.uint8)
+		for i,c in enumerate(cls.classes):
 			eq = mask[0].eq(c.color[0]) & mask[1].eq(c.color[1]) & mask[2].eq(c.color[2])
 			target += eq * i
 
 		return img, target
 
 	@staticmethod
-	def downscale(img_pil: Image, scale: float) -> Image:
-		"""downscale a PIL image"""
-		# Image scaling
-		w, h = img_pil.size
-		w, h = int(scale * w), int(scale * h)
-
-		assert w > 0 and h > 0, 'Scale is too small'
-
-		return img_pil.resize((w, h), resample=Image.NEAREST)
-
-	@staticmethod
-	def masks_to_indices(masks: torch.Tensor, threshold=0.2) -> torch.Tensor:
+	def masks_to_indices(masks: torch.Tensor) -> torch.Tensor:
 		vals, indices = masks.softmax(dim=1).max(dim=1)
+		#_, indices = masks.max(dim=1)
 
-		return indices * vals.gt(threshold)
+		return vals.gt(0.1) * indices
 
 	@classmethod
 	def to_image(cls, masks: torch.Tensor) -> Image:

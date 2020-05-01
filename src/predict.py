@@ -22,7 +22,7 @@ def predict_img(net,
 				scale_factor=0.2) -> torch.Tensor:
 	net.eval()
 
-	img = TF.to_tensor(data.Cityscapes.downscale(full_img, scale_factor))
+	[img, _] = data.Cityscapes.transform(full_img, None)
 	img = img.unsqueeze(0)
 	img = img.to(device=device, dtype=torch.float32)
 
@@ -40,8 +40,7 @@ def get_args():
 						help="Specify the file in which the model is stored")
 	parser.add_argument("--input", "-i", metavar="INPUT", nargs="+",
 						help="filenames of input images", required=True)
-	parser.add_argument("--output", "-o", metavar="INPUT", nargs="+",
-						help="Filenames of ouput images")
+	parser.add_argument("--output", "-o", metavar="OUTPUT_DIR", help="Directory for output images")
 	parser.add_argument("--viz", "-v", action="store_true",
 						help="Visualize the images as they are processed",
 						default=False)
@@ -58,61 +57,54 @@ def get_args():
 	return parser.parse_args()
 
 
-def get_output_filenames(args):
-	in_files = args.input
-	out_files = []
-
-	if not args.output:
-		for f in in_files:
-			pathsplit = os.path.splitext(f)
-			out_files.append("{}_OUT{}".format(pathsplit[0], pathsplit[1]))
-	elif len(in_files) != len(args.output):
-		logging.error("Input files and output files are not of the same length")
-		raise SystemExit()
-	else:
-		out_files = args.output
-
-	return out_files
-
-
 if __name__ == "__main__":
 	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 	# Parse the command-line arguments
 	args = get_args()
 	in_files = args.input
-	out_files = get_output_filenames(args)
+
+	assert os.path.isdir(args.output), "Output must be a directory"
+
+	os.makedirs(args.output, exist_ok=True)
 
 	# Load the model
-	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.classes))
+	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.classes), bilinear=False)
 
 	logging.info(f"Loading model {args.model}")
 
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	logging.info(f"Using device {device}")
 	net.to(device=device)
-	net.load_state_dict(torch.load(args.model, map_location=device))
+
+	if os.path.isdir(args.model):
+		models = [os.path.join(args.model, m) for m in os.listdir(args.model) if m.endswith(".pth")]
+	else:
+		models = [args.model]
 
 	# Predicting images
 	logging.info("Model loaded !")
 
-	for i, fn in enumerate(in_files):
-		logging.info("\nPredicting image {} ...".format(fn))
+	for i_model, m in enumerate(models):
+		net.load_state_dict(torch.load(m, map_location=device))
 
-		img = Image.open(fn)
+		for i_file, fn in enumerate(in_files):
+			logging.info("\nPredicting image {} ...".format(fn))
 
-		mask = predict_img(net=net,
-						   full_img=img,
-						   scale_factor=args.scale,
-						   device=device)
+			img = Image.open(fn)
 
-		result = data.Cityscapes.to_image(mask)
+			mask = predict_img(net=net,
+							   full_img=img,
+							   scale_factor=args.scale,
+							   device=device)
 
-		if not args.no_save:
-			out_fn = out_files[i]
-			result.save(out_files[i])
+			result = data.Cityscapes.to_image(mask)
 
-			logging.info("Mask saved to {}".format(out_files[i]))
+			fname_out = os.path.join(args.output, f"{i_model+1}_{i_file+1}_result.png")
+
+			result.save(fname_out)
+
+			logging.info("Mask saved to {}".format(fname_out))
 
 	logging.info("Done")
 

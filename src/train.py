@@ -20,6 +20,80 @@ from src import data
 from src import iou
 
 
+def train(model, dataset_train, dataset_val, epoch, epochs, train_loader, val_loader, device, criterion, metrics,
+		  optimizer, scheduler, global_step) -> int:
+	with tqdm(total=len(dataset_train), desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
+		for imgs, true_masks in train_loader:
+			assert imgs.shape[1] == model.n_channels, \
+				f'Network has been defined with {model.n_channels} input channels, ' \
+				f'but loaded images have {imgs.shape[1]} channels. Please check that ' \
+				'the images are loaded correctly.'
+
+			model.train()
+
+			optimizer.zero_grad()
+
+			imgs = imgs.to(device=device, dtype=torch.float32)
+			imgs.required_grad = True
+			true_masks = true_masks.to(device=device, dtype=torch.long)
+
+			masks_pred = model(imgs)
+
+			m_loss = criterion(masks_pred, true_masks)
+			m_loss_item = m_loss.item()
+
+			m_iou = iou.IoU(masks_pred, true_masks, device=device)
+			m_iou_item = m_iou.item()
+
+			(m_loss + (1 - m_iou) * 0.1).backward()
+
+			nn.utils.clip_grad_value_(model.parameters(), 0.1)
+			optimizer.step()
+
+			pbar.set_postfix(**{'loss': m_loss_item, 'iou': m_iou_item})
+			pbar.update(imgs.shape[0])
+
+			metrics["train_loss"].append((global_step, m_loss_item))
+			metrics["train_iou"].append((global_step, m_iou_item))
+
+			if (global_step % (len(dataset_train) // train_loader.batch_size // 4)) == 0:
+				val(model, dataset_val, val_loader, device, criterion, metrics, scheduler, global_step)
+
+			global_step += 1
+
+	return global_step
+
+
+def val(model, dataset_val, val_loader, device, criterion, metrics, scheduler, global_step):
+	model.eval()
+
+	logging.info("\nValidating current state...")
+
+	n_val = len(dataset_val) // val_loader.batch_size  # the number of batch
+	tot_loss = 0
+	tot_iou = 0
+	for imgs, true_masks in val_loader:
+		imgs = imgs.to(device=device, dtype=torch.float32)
+		true_masks = true_masks.to(device=device, dtype=torch.long)
+
+		with torch.no_grad():
+			mask_pred = model(imgs)
+
+		tot_loss += criterion(mask_pred, true_masks).item()
+		tot_iou += iou.IoU(mask_pred, true_masks, device=device).item()
+
+	val_score = tot_loss / n_val
+	iou_score = tot_iou / n_val
+
+	scheduler.step(iou_score)
+
+	metrics["val_loss"].append((global_step, val_score))
+	metrics["val_iou"].append((global_step, iou_score))
+
+	logging.info(f'Validation cross entropy : {val_score}')
+	logging.info(f'Validation IoU           : {iou_score}')
+
+
 def train_net(model: nn.Module,
 			  device,
 			  dataset_train: Dataset,
@@ -29,7 +103,7 @@ def train_net(model: nn.Module,
 			  lr=0.01,
 			  checkpoint_dir=None):
 	# Load the network to the device
-	net.to(device=device)
+	model.to(device=device)
 
 	# Define loaders for each split
 	train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=False)
@@ -41,86 +115,25 @@ def train_net(model: nn.Module,
 		f"Starting training with params:\n\t- Epochs = {epochs}\n\t- Batch Size = {batch_size}\n\t- Learnig Rate = {lr}")
 
 	# Define our optimization strategy
-	# optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
-	optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-8 )
-	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
+	optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
+	#optimizer = optim.Adam((model.parameters()), lr=lr, weight_decay=1e-8)
+	scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2, verbose=True, threshold=0.001)
 	criterion = nn.CrossEntropyLoss()
-
 
 	# Count steps
 	global_step = 0
 
 	# Collect metrics from the model
-	metrics = {}
-	metrics["train_iou"] = []
-	metrics["val_iou"] = []
-	metrics["train_loss"] = []
-	metrics["val_loss"] = []
+	metrics = {"train_iou": [], "val_iou": [], "train_loss": [], "val_loss": []}
 
 	for epoch in range(epochs):
-		# Train
-		model.train()
-
-		with tqdm(total=len(dataset_train), desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
-			for imgs, true_masks in train_loader:
-				assert imgs.shape[1] == model.n_channels, \
-					f'Network has been defined with {model.n_channels} input channels, ' \
-					f'but loaded images have {imgs.shape[1]} channels. Please check that ' \
-					'the images are loaded correctly.'
-
-				imgs = imgs.to(device=device, dtype=torch.float32)
-				true_masks = true_masks.to(device=device, dtype=torch.long)
-
-				masks_pred = model(imgs)
-
-				loss = criterion(masks_pred, true_masks)
-				loss_item = loss.item()
-
-				pbar.set_postfix(**{'loss': loss_item})
-				pbar.update(imgs.shape[0])
-
-				metrics["train_loss"].append((global_step, loss_item))
-				metrics["train_iou"].append((global_step, iou.IoU(masks_pred, true_masks, device=device).item()))
-
-				optimizer.zero_grad()
-				loss.backward()
-				nn.utils.clip_grad_value_(model.parameters(), 0.1)
-				optimizer.step()
-
-				global_step += 1
-
-		# Validate
-		net.eval()
-
-		n_val = len(dataset_val) // batch_size  # the number of batch
-		tot_loss = 0
-		tot_iou = 0
-		with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
-			for imgs, true_masks in val_loader:
-				imgs = imgs.to(device=device, dtype=torch.float32)
-				true_masks = true_masks.to(device=device, dtype=torch.long)
-
-				with torch.no_grad():
-					mask_pred = net(imgs)
-
-				tot_loss += F.cross_entropy(mask_pred, true_masks).item()
-				tot_iou += iou.IoU(masks_pred, true_masks, device=device).item()
-
-				pbar.update()
-
-		val_score = tot_loss / n_val
-		iou_score = tot_iou / n_val
-		scheduler.step(val_score)
-
-		metrics["val_loss"].append((global_step, val_score))
-		metrics["val_iou"].append((global_step, iou_score))
-
-		logging.info('Validation cross entropy: {}'.format(val_score))
+		global_step = train(model, dataset_train, dataset_val, epoch, epochs, train_loader, val_loader, device,
+							criterion, metrics, optimizer, scheduler, global_step)
 
 		# Save checkpoint
 		if checkpoint_dir is not None:
 			os.makedirs(checkpoint_dir, exist_ok=True)
-			torch.save(net.state_dict(),
+			torch.save(model.state_dict(),
 					   os.path.join(checkpoint_dir, f"{epoch + 1}.pth"))
 
 			logging.info(f'Checkpoint {epoch + 1} saved !')
@@ -154,7 +167,7 @@ def get_args():
 	parser.add_argument('-l', '--learning-rate',
 						metavar='LR',
 						type=float, nargs='?',
-						default=0.0001,
+						default=0.001,
 						help='Learning rate',
 						dest='lr')
 	parser.add_argument('-m', '--model',
@@ -178,7 +191,7 @@ def save_csv(path: str, l: List):
 		w.writerows(l)
 
 
-if __name__ == "__main__":
+def main():
 	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 	# Parse the CLI arguments
@@ -188,7 +201,9 @@ if __name__ == "__main__":
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	logging.info(f'Using device {device}')
 
-	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.classes), bilinear=True)
+	net = networks.UNet(n_channels=3, n_classes=len(data.Cityscapes.classes), bilinear=False)
+
+	print(net)
 
 	if args.model:
 		net.load_state_dict(
@@ -197,8 +212,6 @@ if __name__ == "__main__":
 		logging.info(f'Model loaded from {args.model}')
 
 	cudnn.benchmark = True
-
-
 
 	# Load the validating and training dataset
 	dataset_train = data.Cityscapes(
@@ -240,3 +253,7 @@ if __name__ == "__main__":
 			sys.exit(0)
 		except SystemExit:
 			os._exit(0)
+
+
+if __name__ == "__main__":
+	main()

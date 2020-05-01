@@ -6,19 +6,13 @@ from src import data
 def IoU(pred_masks, true_masks, device=None) -> torch.Tensor:
 	labels = data.Cityscapes.masks_to_indices(pred_masks)
 
-	positive = labels.gt(0)
-	negative = labels.eq(0)
+	correct = labels.eq(true_masks)
 
-	true_positive = positive.eq(true_masks)
-	true_negative = negative.eq(true_masks)
+	# The true positive (tp) are calculated by taking the correct predictions times the positive preditions
+	tp = (correct * labels.gt(0)).sum()
 
-	false_positive = positive & ~true_positive
-	false_negative = negative & ~true_negative
+	# Since this is a 2D-grid, we have tp + fp + fn + tn = (total)
+	# then tp + fp + fn = (total) - tn
+	den = labels.numel() - (correct * labels.eq(0)).sum()
 
-	score_tp = true_positive.sum()
-	score_fp = false_positive.sum()
-	score_fn = false_negative.sum()
-
-	den = score_tp + score_fp + score_fn
-
-	return score_fp / den.to(torch.float)
+	return tp / den.to(torch.float)

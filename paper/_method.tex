@@ -22,11 +22,13 @@
 \end{table}
 
 As with any machine learning project, first the available data has to be parsed into a practical format.
-
-The dataset consists of a collection of PNG-encoded images (the input) and a corresponding segmentation mask (the ground truth). The segmentation mask is formatted as a JSON-document containing a list of objects that pair a label with a polygon that describes the shape of this object in the image.
-
-When an item in the dataset is requested, the PNG-file is read and converted to an array of matrices, where each channel (red, green and blue) is an element of the array. 
-The polygons file corresponding to this item is then loaded and the polygons are converted to rasters and combined into a single image, with each pixel of this image corresponding to one label (see \Cref{tab:labels}) or nothing.
+The dataset consists of a collection of PNG-encoded images (the input) and a corresponding segmentation mask (the ground truth). 
+The ground truth is a color-coded image, with RGB-channels, where every class corresponds to a single and unique color. 
+The desired output of the network is an image with one channel per class, where each channel represents the probability of that pixel containing a class.
+Parsing the ground truth-image into the encoded channel representationn (one-hot encoding) is done via
+\begin{equation}
+    E_n = L_n[3] 
+\begin{equation}
 
 \subsection{Setting a baseline}
 \label{subsec:baseline}
@@ -41,20 +43,50 @@ Our implementation of the UNet is based on~\cite{GH-Pytorch-UNet2018} with some 
 \subsection{Data augmentation}
 \label{subsec:data-augmentation}
 
-A straightforward way to improve the accuracy of the model is to increase the size of the training set by applying a set of transforms. The following transforms were used:
+A straightforward way to improve the accuracy of the model is to increase the size of the training set by applying a set of transforms. 
+The following transforms were used:
 \begin{itemize}
-    \item Zoom \& rotate
-    \item Mirror over the vertical axis
+    \item Random cropping 
+    \item Random mirroring over the horizontal axis ($p=0.5$)
 \end{itemize}
 
 \subsection{Measuring performance}
-In order to measure how well the network is performing, the Intersection-over-Union (IoU) metric is implemented.
+In order to measure how well the network is performing, the Intersection-over-Union (IoU) metric is implemented, given by
+\begin{equation}
+    \mathrm{IoU} = \frac{T \& P}{TP+FP+FN}
+\end{equation}
 
-\subsection{Network architecture}
-\label{subsec:network-architecture}
-
-
-
-\subsection{Tweaking hypterparameters}
+\subsection{Identifying the model's weaknesses}
 
 
+\subsection{Decision threshold}
+Sometimes, the case can occur where the softmax-likelyhood of a pixel corresponding to a single class is less than a certain value.
+Thresholding [ref] adresses this issue by classifying all pixels with a likelyhood less than a set value as zero.
+Because the Cityscapes dataset has 20 classes, the threshold was set at 
+\begin{equation}
+    p_\mathrm{T} = 2 \cdot \frac{1}{N_\mathrm{classes}} = 0.1
+\end{equation} 
+
+
+\subsection{Edge detection as input}
+A lot of semantic segmentation tasks struggle with classes bleeding into other classes [ref]. 
+A possible was to solve this could be to use a static (non-learned) edge detection filter, 
+and feed this into the network by replacing the alpha channel with the single-channel output of this layer.
+
+The hypothesis is that this will help the network detect higher-frequency information such as edges of objects.
+
+\subsection{Edge loss}
+...
+
+\subsection{Increasing the effective receptive field}
+In order to make the network practical, the input images must be scaled to a size that the training hardware can handle.
+The scaling of images causes a loss of information. 
+A better way to deal with this, would be to downsample the images using strided convolutions. 
+From [red- course sides Convolutional Networks] the output size of a convolutional layer may be calculated by 
+\begin{equation}
+    O = \frac{I+P-K}{S} + 1
+\end{equation}
+where $I$ is the input size, $P$ the amount of padding, $K$ the kernel size and $S$ the stride.
+
+\subsection{Automatic learning rate adjustment}
+The learning rate can be automatically adjusted based on the \texttt{ReduceLROnPlateau} method [ref]. 
