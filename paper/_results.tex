@@ -1,10 +1,43 @@
 \subsection{Baseline}
+Training the baseline U-net on the Cityscapes dataset achieves a maximum IoU-score of 0.45 and a loss of 0.55 after 10 epochs.
 
 \begin{figure}
-    
+	\centering
+	\begin{tabular}{cc}
+		\makecell{
+			\includegraphics[width=.45\linewidth]{figures/base-out-gt.png} \\
+			Ground Truth 
+		} &
+		\makecell{
+			\includegraphics[width=.45\linewidth]{figures/base-out-1.png} \\
+			Epoch 1
+		} \\
+		\makecell{
+			\includegraphics[width=.45\linewidth]{figures/base-out-5.png} \\
+			Epoch 5
+		} &
+		\makecell {
+			\includegraphics[width=.45\linewidth]{figures/base-out-10.png} \\
+			Epoch 10
+		} \\ 
+		
+	\end{tabular}
+	\caption{Output samples of the baseline (U-net) network on a random sample of the validation set}    
+	\label{fig:res-out-baseline}
 \end{figure}
 
+\Cref{fig:res-out-baseline} shows some output samples of this network for a random sample in the validation set. Notice how the network fails to recognize thin objects such as poles and signs. Some parts of the image, such as the sidewalk, appear noisy even after 10 epochs.
+
 \subsection{Data augmentation}
+\begin{figure}
+	\centering
+	\includegraphics[width=0.9\linewidth]{figures/loss-baseline.png}
+	\caption{The loss as a function of the training epoch for the baseline (U-net) network after data augmentation}
+	\label{fig:res-loss-baseline}
+\end{figure}
+
+
+\Cref{fig:res-loss-baseline} shows the loss function during the training process. Without much effort, the loss has decreased from $0.55$ to $0.50$
 
 \subsection{Threshold}
 \begin{figure}
@@ -28,29 +61,94 @@
         } \\ 
         
     \end{tabular}
-    \caption{Ground truth and predicted masks after training for 1, 5 and 10 epochs of the sample \texttt{munster\_000098\_000019\_leftImg8bit.png} using the U-Net model with thresholds and data augmentation}    
+    \caption{Ground truth and predicted masks after training for 1, 5 and 10 epochs on a random sample of the validation set using the U-Net model with thresholds and data augmentation}    
+    \label{fig:res-out-thres}
 \end{figure}
 
+\Cref{fig:res-out-thres} shows the effect of a decision-threshold on the output masks. It appears that the regions with lower confidence, such as at the edges of an object, get ignored sometimes. After 10 epochs, the class masks appear to more closely match the contours of objects.
+
 \begin{figure}
-    \centering
-    \begin{tabular}{cc}
-        \makecell{
-            \includegraphics[width=.45\linewidth]{data/threshold/output_truth.png} \\
-            Ground Truth 
-        } &
-        \makecell{
-            \includegraphics[width=.45\linewidth]{data/reduced-dims/output_1.png} \\
-            Epoch 1
-        } \\
-        \makecell{
-            \includegraphics[width=.45\linewidth]{data/reduced-dims/output_5.png} \\
-            Epoch 5
-        } &
-        \makecell {
-            \includegraphics[width=.45\linewidth]{data/reduced-dims/output_10.png} \\
-            Epoch 10
-        } \\ 
-        
-    \end{tabular}
-    \caption{Ground truth and predicted masks after training for 1, 5 and 10 epochs of the sample \texttt{munster\_000098\_000019\_leftImg8bit.png} using the U-Net model with reduced dimensions}    
+	\centering
+	\includegraphics[width=0.9\linewidth]{figures/iou-threshold.png}
+	\caption{The IoU as a function of the training epoch for the network with a decision threshold of 0.1.}
+	\label{fig:res-iou-thres}
 \end{figure}
+
+Notice from \Cref{fig:res-iou-thres} that the IoU now starts at 0 in the untrained network, when all predictions have a confidence less than 0.1. This is to be expected with this method.
+
+Because the decisions of the network do not affect the cross-entropy loss, the loss curve is still exactly the same as in \Cref{fig:res-loss-baseline}. Interestingly, the loss slowly decays while the IoU remains roughly the same after 2 epochs. This can be explained by the nature of loss and decisions: after 2 epochs, predictions are reinforced with a stronger confidence but the classes that hold maximum values that lead to a decision remain roughly the same.
+
+\subsection{Edge detection as input}
+\begin{figure}
+	\centering
+	\subfloat[Loss\label{fig:res-loss-edges}]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/loss-edges.png}
+	}
+	\subfloat[IoU\label{fig:res-iou-edges}]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/iou-edges.png}
+	}
+	\caption{Loss and IoU as a function of the training epoch for the network with data augmentation, decision threshold and pre-processed edge detection as the 4-th channel of the input image.}
+	\label{fig:res-edges}
+\end{figure}
+
+\Cref{fig:res-edges} shows the effects of edge detection pre-processing being fed into the network as the 4-th channel. While the loss does not improve significantly, there is a significant improvement of 0.2 for the IoU-score. 
+
+\begin{figure}
+	\centering
+	\includegraphics[width=0.9\linewidth]{figures/edges-out-10.png}
+	\caption{Output of the network with edge detection pre-processing input after 10 epochs.}
+	\label{fig:out-edges}
+\end{figure}
+
+\cref{fig:out-edges} shows the output of this network after 10 epochs. 
+This is the same sample as showcased in \cref{fig:res-out-baseline}. 
+By inspection, notice that more fine-details are visible on the output with edge detection, while the logo on the bottom of the car (the black circle) seems to have disappeared.
+
+\subsection{Regularization using dropout}
+\begin{figure}
+	\centering
+	\subfloat[Loss]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/loss-dropout.png}
+	}
+	\subfloat[IoU]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/iou-dropout.png}
+	}
+	\caption{Loss and IoU as a function of the training epoch for the network with dropout ($p=0.1$) after every convolutional layer.}
+	\label{fig:res-dropout}
+\end{figure}
+
+\Cref{fig:res-dropout} shows the results with the smallest dropout rate applied. Values between $0.1$ and $0.5$ were tried, but all values had a negative impact on the results. Dropout did thus not positively affect the network and the changes were discarded.
+
+\subsection{Strided convolutions}
+\begin{figure}
+	\centering
+	\subfloat[Loss]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/loss-stride-in.png}
+	}
+	\subfloat[IoU]{
+		\centering
+		\includegraphics[width=0.45\linewidth]{figures/iou-stride-in.png}
+	}
+	\caption{Loss and IoU as a function of the training epoch with all optimizations enabled and using strided-convolutions to downsample the input}
+	\label{fig:res-strided}
+\end{figure}
+\Cref{fig:res-strided} shows the loss and IoU-score when using strided convolutions to downsample the input. This yields an IoU of 8.4 and a loss of 0.45 after 10 epochs. 
+
+\subsection{Automatic learning rate adjustment}
+\begin{figure}
+	\centering
+	\includegraphics[width=0.9\linewidth]{figures/loss-autolr.png}
+	\caption{Loss as a function of the training epoch with all optimizations enabled and automatic learning rate adjustment.}
+	\label{fig:res-autolr}
+\end{figure}
+
+\Cref{fig:res-autolr} shows the loss with automatic learning rate adjustment. At 2.5 epoch and at 8.5 epoch, the learning rate is adjusted. 
+This is evident from the sudden drop in the validation curve. The automatic tuning of the learning rate has no effect on the result of the network, but the solution does appear to converge sooner. 
+In order to make the adjustment work, the training process had to be adjusted to validate at more frequent intervals. 
+This causes a net slowdown of the learning process. For this reason, this optimization is not part of the final solution.
+

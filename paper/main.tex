@@ -14,19 +14,7 @@
 
 % Tables with footnotes
 \usepackage{threeparttable}
-
-% Tikz - used to draw diagrams
-\usepackage{tikz}
-\usetikzlibrary{shapes}
-\usetikzlibrary{arrows}
-
-\usepackage{pgfplots}
-\usepackage{pgfplotstable}
-
-\usepgfplotslibrary{external} 
-\tikzexternalize
-\pgfplotsset{compat=newest}
-\fboxsep=0pt
+\usepackage[caption=false, font=footnotesize]{subfig}
 
 % References and clickable refs
 \usepackage{hyperref}
@@ -38,10 +26,9 @@
 % Hyphenation for field-specific terms
 \hyphenation{eindhoven op-tical net-works semi-conduc-tor}
 
-\title{Cityscapes Segmentation}
+\title{U-Net with pre-processed edge detection and learned down-sampling for semantic segmentation}
 \author{
-    \IEEEauthorblockN{K.H.W. Stolle}\\
-    \IEEEauthorblockA{Eindhoven University of Technology\\k.h.w.stolle@student.tue.nl}
+    \IEEEauthorblockN{K.H.W. Stolle - k.h.w.stolle@student.tue.nl}
 }
 
 \begin{document}
@@ -52,10 +39,6 @@
         \input{_abstract}
     \end{abstract}
 
-    \begin{IEEEkeywords}
-        Cityscapes, Segmentation, CNN
-    \end{IEEEkeywords}
-
     \section{Introduction}
     \label{sec:introduction}
     \input{_introduction}
@@ -64,13 +47,13 @@
     \label{sec:method}
     \input{_method}
 
-    \section{Results}
+    \section{Results \& Discussion}
     \label{sec:results}
     \input{_results}
 
-    \section{Discussion}
-    \label{sec:discussion}
-    \input{_discussion}
+    %\section{Discussion}
+    %\label{sec:discussion}
+    %\input{_discussion}
 
     \section{Conclusion}
     \label{sec:conclusion}

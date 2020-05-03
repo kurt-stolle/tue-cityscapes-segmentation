@@ -16,7 +16,6 @@
         Object      & pole, pole group, traffic sign, traffic light \\
         Nature      & vegetation, terrain \\
         Sky	        & sky \\
-        Void        & ground, dynamic, static \\
         \hline
     \end{tabular}
 \end{table}
@@ -24,21 +23,20 @@
 As with any machine learning project, first the available data has to be parsed into a practical format.
 The dataset consists of a collection of PNG-encoded images (the input) and a corresponding segmentation mask (the ground truth). 
 The ground truth is a color-coded image, with RGB-channels, where every class corresponds to a single and unique color. 
-The desired output of the network is an image with one channel per class, where each channel represents the probability of that pixel containing a class.
-Parsing the ground truth-image into the encoded channel representationn (one-hot encoding) is done via
-\begin{equation}
-    E_n = L_n[3] 
-\begin{equation}
+The desired output of the network is an image with one channel per class, each represents the probability of that class being present at the image's pixel.
+Parsing the ground truth-image into the encoded channel representation (one-hot encoding) is done by iterating over the set of classes (\Cref{tab:labels}), comparing the mask's color at a pixel to the expected color for this class.
 
-\subsection{Setting a baseline}
+\subsection{Baseline \& testing environment}
 \label{subsec:baseline}
 
 The baseline implementation sets a reference point to improve upon and score our method against.
 
 The architecture U-Net is suitable for semantic segmentation of biological cells under a microscope~\cite{RonnebergerFB15}. 
-In this paper, the same implementation is used as a baseline for the segmentation of the cityscapes.
+In this paper, the same implementation is used as a baseline for the segmentation of the Cityscapes Dataset.
 
-Our implementation of the UNet is based on~\cite{GH-Pytorch-UNet2018} with some modifications to work with the Cityscapes Dataset.
+Our implementation of the UNet is based on~\cite{GH-Pytorch-UNet2018} with some modifications to work with the Cityscapes Dataset. Because the UNet architecture requires a large amount of GPU-memory to train, all inputs of the dataset have been scaled down by a factor of 0.2 before feeding the network.
+
+The network is optimized by the Adam optimizer~\cite{Kingma2015AdamAM} using Categorical Cross-Entropy as the loss function~\cite{10.1145/1102351.1102422}.
 
 \subsection{Data augmentation}
 \label{subsec:data-augmentation}
@@ -53,40 +51,51 @@ The following transforms were used:
 \subsection{Measuring performance}
 In order to measure how well the network is performing, the Intersection-over-Union (IoU) metric is implemented, given by
 \begin{equation}
-    \mathrm{IoU} = \frac{T \& P}{TP+FP+FN}
+    \mathrm{IoU} = \frac{\mathrm{TP}}{\mathrm{TP}+\mathrm{FP}+\mathrm{FN}}
 \end{equation}
+where TP is the amount of true-positive pixels, FP is the amount of false-positive pixels and FN is the amount of false-negative pixels. A pixel is positive if it has a class-index greater than 0, and a pixel is true if the predicted value (from the output mask) is equal to the actual value (from the ground truth mask).
 
 \subsection{Identifying the model's weaknesses}
-
+In addition to collecting the IoU and loss values at each step of the training process, we must also find a way to identify at which types of images the model performs worse than others. To achieve this, the sample ID from the dataset must be supplied to the training process, such that the performance against each sample can be logged. It is important to note that this data should not be used to affect the training process, for this will cause overfitting.
 
 \subsection{Decision threshold}
-Sometimes, the case can occur where the softmax-likelyhood of a pixel corresponding to a single class is less than a certain value.
-Thresholding [ref] adresses this issue by classifying all pixels with a likelyhood less than a set value as zero.
-Because the Cityscapes dataset has 20 classes, the threshold was set at 
+Sometimes, the case can occur where the softmax-likelihood of a pixel corresponding to a class is very low. 
+In this case, it would be better to predict that the class label of this pixel is void, than to predict a label with low confidence.
+Dropping all class-probabilities below a threshold-value addresses this issue by classifying all pixels with a likelihood less than a set value as zero~\cite{Li_2017_CVPR}.
+Because the Cityscapes Dataset has 20 classes, the threshold was set at 
 \begin{equation}
     p_\mathrm{T} = 2 \cdot \frac{1}{N_\mathrm{classes}} = 0.1
 \end{equation} 
 
 
 \subsection{Edge detection as input}
-A lot of semantic segmentation tasks struggle with classes bleeding into other classes [ref]. 
+A lot of semantic segmentation tasks struggle with classes bleeding into other classes. 
 A possible was to solve this could be to use a static (non-learned) edge detection filter, 
-and feed this into the network by replacing the alpha channel with the single-channel output of this layer.
+and feed this into the network by replacing the alpha channel with the single-channel output of this layer~\cite{DBLP:journals/corr/ChenBPMY15}.
 
-The hypothesis is that this will help the network detect higher-frequency information such as edges of objects.
+\begin{figure}
+	\centering
+	\includegraphics[width=.9\linewidth]{figures/edge-det.png}
+	\caption{The output of an edge-detection filter from the Pillow Python library when applied on a down scaled sample of the Cityscapes dataset. \textit{We encourage the reader to zoom-in digitally to view the fine edges generated by the filter}.}
+	\label{fig:meth-edge-det}
+\end{figure}
 
-\subsection{Edge loss}
-...
+\Cref{fig:meth-edge-det} shows the output of such a filter. The hypothesis is that this will help the edges of the semantic segmentation mask to more accurately stick to the edges of objects. This comes at a cost though: adding a another channel will increase the size of the filter kernel at the input channel, making the network consume more memory. Additionally, if the amount of channels of the first layer does not change, then this layer will not be able to extract as much features from the input as in the 3-channel (RGB) case.
 
-\subsection{Increasing the effective receptive field}
-In order to make the network practical, the input images must be scaled to a size that the training hardware can handle.
-The scaling of images causes a loss of information. 
+\subsection{Regularization using dropout}
+While the most popular fully-convolutional networks do not use dropout, implementing dropout in the convolutional layers of the U-Net could successfully regularize the network, improving the performance on unseen samples~\cite{Spilsbury2019DontID}. 
+A dropout was added after each convolutional layer.
+
+\subsection{Strided convolutions}
+In order to make the network practical, the input images must be scaled to a size that the training hardware can handle. The scaling of images causes a loss of information. For example, at the scaling factor of 0.2 (the maximum that the network can handle before optimization), lamp-posts almost disappear because they are too thin.
 A better way to deal with this, would be to downsample the images using strided convolutions. 
-From [red- course sides Convolutional Networks] the output size of a convolutional layer may be calculated by 
-\begin{equation}
-    O = \frac{I+P-K}{S} + 1
+From the course 5LSM0, it is known that the output size of a convolutional layer can be calculated via \begin{equation}
+O = \frac{I+P-K}{S} + 1
 \end{equation}
-where $I$ is the input size, $P$ the amount of padding, $K$ the kernel size and $S$ the stride.
+where $I$ is the input size, $P$ the amount of padding, $K$ the kernel size and $S$ the stride. 
+Using this equation, the first two convolutional layers of the network are set-up to each downsample the input image by a factor of 0.5 (for a total of 0.25). The output segmentation mask is then upscaled using the nearest-neighbours method. This should yield a mask with \textit{rougher edges}, but higher IoU-accuracy.
+
+Additionally, the (un)pooling operations may be replaced with a strided convolution in order to learn the up- and downscaling operations of the network~\cite{springenberg2014striving}. This could significantly improve the accuracy of the network. 
 
 \subsection{Automatic learning rate adjustment}
-The learning rate can be automatically adjusted based on the \texttt{ReduceLROnPlateau} method [ref]. 
+The learning rate can be automatically adjusted based on the \texttt{ReduceLROnPlateau} method, which is part of the PyTorch standard library. The starting learning rate is set to $R=0.01$ (a value determined by trial-and-error) and decreased by a factor of $0.1$ every time the IoU score does not increase for a to-be-determined amount of cycles. This should help the network to converge faster than traditional learning with a lower rate \cite{DBLP:journals/corr/abs-1708-07120}.

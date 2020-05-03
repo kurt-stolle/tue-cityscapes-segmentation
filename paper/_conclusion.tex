@@ -1,0 +1,13 @@
+The U-net architecture can be adjusted to perform pixel-level semantic segmentation on the Cityscapes Dataset with a IoU-score of 0.84. To achieve this, the following adjustments were made with respect to the baseline implementation:
+\begin{itemize}
+	\item Data augmentation
+	\item Adding a decision threshold
+	\item Pre-processed edge detection as input
+	\item Downsampling using strided convolutions
+\end{itemize}
+\textit{Note that a final score on the test-set was not achieved by the network, as the images had to be compressed too much to be accepted by the Cityscapes testing suite.}
+
+\section{Future work}
+The most promising improvement was made by involving edge detection in the network. This was done by feeding a pre-processing step into the network's input. This may not be the optimal solution, as this reduces the amount of features that can be extracted. Another possible solution would be to feed the edge detection into the later layers of the network, after an image is reconstructed by the upsampling layers. Additionally, the edge detection could be also be a learned operation.
+
+A limiting factor in this research was the amount of GPU-memory available. The memory usage of the network could be reduced by applying checkpointing, which trades computation time for memory usage, or by training the network with 16-bit floating point operations instead of 32-bit floating point operations. Future work will have to explore these options.
